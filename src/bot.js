@@ -3,12 +3,16 @@
  */
 
 import mineflayer from "mineflayer";
-import { pathfinder } from "mineflayer-pathfinder";
-import { plugin as pvp } from "mineflayer-pvp";
-import { plugin as collectBlock } from "mineflayer-collectblock";
+import pathfinderPkg from "mineflayer-pathfinder";
+const { pathfinder } = pathfinderPkg;
+import pvpPkg from "mineflayer-pvp";
+const { plugin: pvp } = pvpPkg;
+import collectBlockPkg from "mineflayer-collectblock";
+const { plugin: collectBlock } = collectBlockPkg;
 import { loader as autoEat } from "mineflayer-auto-eat";
 import armorManager from "mineflayer-armor-manager";
-import { plugin as toolPlugin } from "mineflayer-tool";
+import toolPkg from "mineflayer-tool";
+const { plugin: toolPlugin } = toolPkg;
 
 import { setupChat } from "./chat.js";
 import { setupProtection } from "./plugins/protection.js";

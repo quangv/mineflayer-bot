@@ -2,7 +2,8 @@
  * Navigation plugin — pathfinding helpers.
  */
 
-import { Movements, goals } from "mineflayer-pathfinder";
+import pathfinderPkg from "mineflayer-pathfinder";
+const { Movements, goals } = pathfinderPkg;
 import mcDataLoader from "minecraft-data";
 
 export function setupNavigation(bot) {
