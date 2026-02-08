@@ -2,6 +2,18 @@
 
 A friendly bot that **protects human players** and **beats Minecraft** (all the way to the Ender Dragon).
 
+## How to use
+
+Make sure using a supported minecraft version (Java 1.21.10)
+
+1. Start Minecraft Java Edition → click Play Singleplayer → Create New World → Survival → Create
+2. Wait for the world to load and you spawn in
+3. Press Esc → Open to LAN → Start LAN World
+4. Use port 25565
+5. Run npm start in your terminal
+
+(version and port is in `.env`)
+
 ## Features
 
 - **Player Protection** — Follows a player, detects nearby hostile mobs, and fights them off.
