@@ -8,6 +8,23 @@ import Vec3 from "vec3";
 export function setupBuilding(bot) {
   const mcData = mcDataLoader(bot.version);
 
+  /** Check if the bot is in creative mode */
+  function isCreative() {
+    return bot.game?.gameMode === "creative" || bot.game?.gameMode === 1;
+  }
+
+  /** In creative mode, /give ourselves blocks we need */
+  async function creativeGive(items) {
+    for (const [name, count] of items) {
+      try {
+        bot.chat(`/give ${bot.username} ${name} ${count}`);
+        await new Promise((r) => setTimeout(r, 150));
+      } catch {}
+    }
+    // Wait for inventory to update
+    await new Promise((r) => setTimeout(r, 500));
+  }
+
   /**
    * Build a simple survival house (5×5 base, 4 high, with door, torch, bed, chest, crafting table).
    */
@@ -195,12 +212,18 @@ export function setupBuilding(bot) {
     bot.chat("Building a quick shelter!");
 
     try {
+      if (isCreative()) {
+        await creativeGive([["oak_planks", 32]]);
+      }
+
       const plankItem = bot.inventory
         .items()
         .find((i) => i.name.endsWith("_planks"));
       if (!plankItem || plankItem.count < 12) {
-        bot.chat("Need at least 12 planks for a shelter!");
-        return false;
+        if (!isCreative()) {
+          bot.chat("Need at least 12 planks for a shelter!");
+          return false;
+        }
       }
       const PLANK = plankItem.name;
       const origin = bot.entity.position.floored().offset(-1, 0, -1);
@@ -385,66 +408,85 @@ export function setupBuilding(bot) {
     bot.chat("Time to build an EPIC house! This is gonna be awesome!");
 
     try {
-      // ── Gather materials ────────────────────────────────────────
       const fb = bot.friendlyBot;
-      const logTypes = [
-        "oak_log", "birch_log", "spruce_log",
-        "dark_oak_log", "acacia_log", "jungle_log",
-      ];
 
-      const totalPlanks = bot.inventory
-        .items()
-        .filter((i) => i.name.endsWith("_planks"))
-        .reduce((s, i) => s + i.count, 0);
+      if (isCreative()) {
+        bot.chat("Creative mode! Grabbing all the blocks I need...");
+        await creativeGive([
+          ["oak_planks", 256],
+          ["oak_log", 64],
+          ["cobblestone", 128],
+          ["oak_door", 2],
+          ["crafting_table", 1],
+          ["furnace", 1],
+          ["chest", 4],
+          ["torch", 16],
+        ]);
+      } else {
+        // ── Gather materials (survival mode) ────────────────────────
+        const logTypes = [
+          "oak_log",
+          "birch_log",
+          "spruce_log",
+          "dark_oak_log",
+          "acacia_log",
+          "jungle_log",
+        ];
 
-      if (totalPlanks < 200) {
-        bot.chat("Going to need a LOT of wood for this one...");
-        for (const log of logTypes) {
-          if (fb.countItem(log) < 48) {
-            await fb.mineBlock(log, 48 - fb.countItem(log)).catch(() => {});
+        const totalPlanks = bot.inventory
+          .items()
+          .filter((i) => i.name.endsWith("_planks"))
+          .reduce((s, i) => s + i.count, 0);
+
+        if (totalPlanks < 200) {
+          bot.chat("Going to need a LOT of wood for this one...");
+          for (const log of logTypes) {
+            if (fb.countItem(log) < 48) {
+              await fb.mineBlock(log, 48 - fb.countItem(log)).catch(() => {});
+            }
+            const count = fb.countItem(log);
+            if (count > 0) {
+              const plankName = log.replace("_log", "_planks");
+              await fb.craftItem(plankName, Math.floor(count)).catch(() => {});
+            }
+            const currentPlanks = bot.inventory
+              .items()
+              .filter((i) => i.name.endsWith("_planks"))
+              .reduce((s, i) => s + i.count, 0);
+            if (currentPlanks >= 200) break;
           }
-          // Convert to planks
-          const count = fb.countItem(log);
-          if (count > 0) {
-            const plankName = log.replace("_log", "_planks");
-            await fb.craftItem(plankName, Math.floor(count)).catch(() => {});
-          }
-          const currentPlanks = bot.inventory
-            .items()
-            .filter((i) => i.name.endsWith("_planks"))
-            .reduce((s, i) => s + i.count, 0);
-          if (currentPlanks >= 200) break;
         }
+
+        if (fb.countItem("cobblestone") < 80) {
+          bot.chat("Mining some stone for the foundation...");
+          await fb
+            .mineBlock("stone", 80 - fb.countItem("cobblestone"))
+            .catch(() => {});
+        }
+
+        if (!fb.hasItem("crafting_table"))
+          await fb.craftItem("crafting_table", 1).catch(() => {});
+        if (!fb.hasItem("oak_door") && !fb.hasItem("spruce_door"))
+          await fb.craftItem("oak_door", 1).catch(() => {});
+        if (!fb.hasItem("chest"))
+          await fb.craftItem("chest", 2).catch(() => {});
+        if (!fb.hasItem("furnace"))
+          await fb.craftItem("furnace", 1).catch(() => {});
       }
 
-      // Also need cobblestone for the foundation
-      if (fb.countItem("cobblestone") < 80) {
-        bot.chat("Mining some stone for the foundation...");
-        await fb.mineBlock("stone", 80 - fb.countItem("cobblestone")).catch(() => {});
-      }
-
-      // Craft extras
-      if (!fb.hasItem("crafting_table"))
-        await fb.craftItem("crafting_table", 1).catch(() => {});
-      if (!fb.hasItem("oak_door") && !fb.hasItem("spruce_door"))
-        await fb.craftItem("oak_door", 1).catch(() => {});
-      if (!fb.hasItem("chest"))
-        await fb.craftItem("chest", 2).catch(() => {});
-      if (!fb.hasItem("furnace"))
-        await fb.craftItem("furnace", 1).catch(() => {});
-
-      // Get available materials
       const plankItem = bot.inventory
         .items()
         .find((i) => i.name.endsWith("_planks"));
-      if (!plankItem || plankItem.count < 50) {
+      if (!isCreative() && (!plankItem || plankItem.count < 50)) {
         bot.chat("I don't have enough planks! Need way more wood.");
         bot.friendlyBot.busy = false;
         return false;
       }
-      const PLANK = plankItem.name;
+      const PLANK = plankItem ? plankItem.name : "oak_planks";
       const STONE = fb.hasItem("cobblestone") ? "cobblestone" : PLANK;
-      const logItem = bot.inventory.items().find((i) => i.name.endsWith("_log"));
+      const logItem = bot.inventory
+        .items()
+        .find((i) => i.name.endsWith("_log"));
       const LOG = logItem ? logItem.name : PLANK;
       const stripped = LOG.replace("_log", "_planks");
 
@@ -456,7 +498,9 @@ export function setupBuilding(bot) {
       bot.chat("Breaking ground! Here we go!");
       await clearArea(origin.offset(-1, 0, -1), 13, 12, 13);
 
-      const W = 11, D = 11, H = 5;
+      const W = 11,
+        D = 11,
+        H = 5;
 
       // ── Foundation ─────────────────────────────────────────────
       bot.chat("Laying the stone foundation...");
@@ -529,7 +573,10 @@ export function setupBuilding(bot) {
         for (let z = -1; z <= D; z++) {
           if (layer < Math.floor(W / 2)) {
             await placeBlockAt(origin.offset(layer, H + layer, z), PLANK);
-            await placeBlockAt(origin.offset(W - 1 - layer, H + layer, z), PLANK);
+            await placeBlockAt(
+              origin.offset(W - 1 - layer, H + layer, z),
+              PLANK,
+            );
           } else {
             // Ridge cap
             await placeBlockAt(origin.offset(layer, H + layer, z), LOG);
@@ -545,7 +592,10 @@ export function setupBuilding(bot) {
         .items()
         .find((i) => i.name.endsWith("_door"));
       if (doorItem) {
-        await placeItemAt(origin.offset(Math.floor(W / 2), 0, 0), doorItem.name);
+        await placeItemAt(
+          origin.offset(Math.floor(W / 2), 0, 0),
+          doorItem.name,
+        );
       }
 
       // Crafting table
@@ -577,11 +627,17 @@ export function setupBuilding(bot) {
       if (fb.hasItem("torch")) {
         await placeItemAt(origin.offset(1, 2, Math.floor(D / 2)), "torch");
         if (fb.hasItem("torch"))
-          await placeItemAt(origin.offset(W - 2, 2, Math.floor(D / 2)), "torch");
+          await placeItemAt(
+            origin.offset(W - 2, 2, Math.floor(D / 2)),
+            "torch",
+          );
         if (fb.hasItem("torch"))
           await placeItemAt(origin.offset(Math.floor(W / 2), 2, 1), "torch");
         if (fb.hasItem("torch"))
-          await placeItemAt(origin.offset(Math.floor(W / 2), 2, D - 2), "torch");
+          await placeItemAt(
+            origin.offset(Math.floor(W / 2), 2, D - 2),
+            "torch",
+          );
       }
 
       // ── Front porch ────────────────────────────────────────────
