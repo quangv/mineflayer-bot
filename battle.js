@@ -1,29 +1,27 @@
 /**
- * Battle Mode — 5 bots, Team Red vs Team Blue!
+ * Co-op Mode — 6 bots working TOGETHER to beat Minecraft!
  *
- * RED TEAM (3 bots — trying to beat the game):
- *   - FriendlyBot  (leader, runs full progression)
- *   - RedGuard1    (bodyguard, protects FriendlyBot)
- *   - RedGuard2    (bodyguard, gathers resources & defends)
+ * THE SQUAD:
+ *   - FriendlyBot  (leader — runs full game progression)
+ *   - RedGuard1    (bodyguard — protects the leader)
+ *   - RedGuard2    (gatherer — mines resources for the team)
+ *   - RedScout     (scout — explores ahead, warns about mobs)
+ *   - BlueHelper1  (fighter — kills hostile mobs around the group)
+ *   - BlueHelper2  (builder — follows leader, helps with tasks)
  *
- * BLUE TEAM (2 bots — hunters trying to stop Red):
- *   - BlueHunter1  (aggressive, chases red team)
- *   - BlueHunter2  (sneaky, flanker)
- *
- * All bots are a little dumb — they miss, get distracted,
- * panic, forget what they were doing, etc.
+ * All bots are a little dumb and talk to each other constantly.
  *
  * Usage:
  *   node battle.js
  *
  * Chat commands (say in-game):
- *   fight          — Blue team starts hunting Red team
- *   stop           — Everyone stops fighting
- *   beat           — Red team starts progression (beat the game)
- *   score          — Show kill scoreboard
- *   reset          — Heal all bots
+ *   go / beat      — Start progression (beat the game!)
+ *   stop           — Everyone stops
+ *   regroup        — Everyone comes to you
+ *   status         — Show what everyone is doing
  *   kit <tier>     — Give all bots gear (stone/iron/diamond/netherite)
- *   arm red / arm blue — Give random gear to one team
+ *   arm            — Give everyone random gear
+ *   reset          — Heal all bots
  *   quit           — Disconnect all bots
  */
 
@@ -40,7 +38,7 @@ import { loader as autoEat } from "mineflayer-auto-eat";
 import toolPkg from "mineflayer-tool";
 const { plugin: toolPlugin } = toolPkg;
 
-// Import the full FriendlyBot module system for red leader
+// Import full FriendlyBot modules for the leader
 import { setupNavigation } from "./src/plugins/navigation.js";
 import { setupCombat } from "./src/plugins/combat.js";
 import { setupProtection } from "./src/plugins/protection.js";
@@ -61,26 +59,25 @@ const PORT = parseInt(process.env.BOT_PORT, 10) || 25565;
 const VERSION = process.env.BOT_VERSION || "1.20.4";
 
 const BOTS_CONFIG = [
-  // ── Red Team ──
-  { name: "FriendlyBot", team: "red", role: "leader", color: "\x1b[31m" },
-  { name: "RedGuard1", team: "red", role: "bodyguard", color: "\x1b[33m" },
-  { name: "RedGuard2", team: "red", role: "gatherer", color: "\x1b[35m" },
-  // ── Blue Team ──
-  { name: "BlueHunter1", team: "blue", role: "hunter", color: "\x1b[34m" },
-  { name: "BlueHunter2", team: "blue", role: "flanker", color: "\x1b[36m" },
+  { name: "FriendlyBot", role: "leader", color: "\x1b[31m", emoji: "[LEADER]" },
+  { name: "RedGuard1", role: "bodyguard", color: "\x1b[33m", emoji: "[GUARD]" },
+  { name: "RedGuard2", role: "gatherer", color: "\x1b[35m", emoji: "[GATHER]" },
+  { name: "RedScout", role: "scout", color: "\x1b[32m", emoji: "[SCOUT]" },
+  { name: "BlueHelper1", role: "fighter", color: "\x1b[34m", emoji: "[FIGHT]" },
+  { name: "BlueHelper2", role: "builder", color: "\x1b[36m", emoji: "[BUILD]" },
 ];
+
+const BOT_NAMES = BOTS_CONFIG.map((b) => b.name);
 
 // ── State ───────────────────────────────────────────────────────────────
 
-const bots = {}; // { name: bot }
-const score = { red: 0, blue: 0 };
-let hunting = false; // Blue team is actively hunting
-let progressing = false; // Red team is trying to beat the game
+const bots = {};
+let active = false;
 let readyCount = 0;
 
-// ── Dumb Bot Personality ────────────────────────────────────────────────
+// ── Dumb Bot Config ─────────────────────────────────────────────────────
 
-const DUMB_CHANCE = 0.25; // 25% chance to do something stupid each tick
+const DUMB_CHANCE = 0.2;
 
 const DUMB_THINGS = [
   (bot) => {
@@ -145,58 +142,447 @@ const DUMB_THINGS = [
   },
 ];
 
-const RED_CHATTER = [
-  "Team Red! Let's go!",
-  "Protect the leader!",
-  "We got this, boys!",
-  "Blue team is coming, watch out!",
-  "Stay together!",
-  "I'll watch your back!",
-  "Did anyone bring food?",
-  "We need more wood!",
-  "The Ender Dragon doesn't stand a chance!",
-  "Is it just me or is that creeper staring at us?",
-];
-
-const BLUE_CHATTER = [
-  "Find them! Destroy them!",
-  "Red team can't hide forever!",
-  "Let's go hunting!",
-  "I smell fear... and oak planks.",
-  "They're trying to beat the game? Not on my watch!",
-  "Split up and flank them!",
-  "Where'd they go?!",
-  "I think I see one!",
-  "GET 'EM!",
-  "Blue team best team!",
-];
-
-const DEATH_LINES = [
-  "Ow... that hurt...",
-  "I'll be back!",
-  "This isn't over!",
-  "Respawning in 3... 2... 1...",
-  "Lucky shot!",
-  "My lag was terrible!",
-  "I wasn't even trying!",
-  "Tell my crafting table... I loved her...",
-  "x_x",
-  "I blame the server tick rate.",
-];
-
-const KILL_LINES = [
-  "Get rekt!",
-  "Too easy!",
-  "One down!",
-  "Bye bye!",
-  "Should've brought better armor!",
-  "That's what happens!",
-  "ELIMINATED!",
-  "Next!",
-];
-
 function pick(arr) {
   return arr[Math.floor(Math.random() * arr.length)];
+}
+
+function maybeDoDumbThing(bot) {
+  if (Math.random() < DUMB_CHANCE) {
+    pick(DUMB_THINGS)(bot);
+    return true;
+  }
+  return false;
+}
+
+function delayedAction(minMs = 500, maxMs = 2000) {
+  return new Promise((resolve) =>
+    setTimeout(resolve, minMs + Math.random() * (maxMs - minMs)),
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  INTER-BOT CONVERSATION SYSTEM
+// ═══════════════════════════════════════════════════════════════════════
+
+/** Conversations bots have with each other. Format: [speaker_role, line, reply_role, reply] */
+const CONVERSATIONS = [
+  // General banter
+  [
+    "bodyguard",
+    "Hey {leader}, how's the progression going?",
+    "leader",
+    "Still working on it! We need more resources.",
+  ],
+  ["leader", "Does anyone have iron?", "gatherer", "I'll go look for some!"],
+  [
+    "fighter",
+    "I just killed a zombie!",
+    "scout",
+    "Nice! I saw more over that way.",
+  ],
+  [
+    "gatherer",
+    "I found some coal!",
+    "leader",
+    "Great job! Bring it over here.",
+  ],
+  [
+    "scout",
+    "Guys there's a cave over here!",
+    "fighter",
+    "Ooh let's check it out!",
+  ],
+  [
+    "builder",
+    "Should I build something?",
+    "leader",
+    "Not yet, stay close for now.",
+  ],
+  [
+    "bodyguard",
+    "All clear around us!",
+    "scout",
+    "I see some skeletons to the north though...",
+  ],
+  [
+    "fighter",
+    "Who wants to help me fight that creeper?",
+    "bodyguard",
+    "I got your back!",
+  ],
+  [
+    "gatherer",
+    "My inventory is getting full...",
+    "builder",
+    "Give me some stuff, I'll carry it!",
+  ],
+  [
+    "scout",
+    "The view from up here is amazing!",
+    "leader",
+    "Stop sightseeing and keep scouting!",
+  ],
+  [
+    "builder",
+    "I wish I could build a house right now",
+    "bodyguard",
+    "We don't have time for that!",
+  ],
+  [
+    "fighter",
+    "Why am I always the one fighting?!",
+    "leader",
+    "Because you're good at it!",
+  ],
+  [
+    "gatherer",
+    "Anyone want some wood?",
+    "builder",
+    "Yes please! Throw it here!",
+  ],
+  ["scout", "I think I'm lost...", "bodyguard", "Just follow my nametag!"],
+  [
+    "builder",
+    "This is actually kinda fun!",
+    "fighter",
+    "Until a creeper shows up...",
+  ],
+
+  // Directed at each other
+  [
+    "bodyguard",
+    "{leader}, you're walking too fast!",
+    "leader",
+    "Sorry! I'm excited about progress!",
+  ],
+  [
+    "scout",
+    "{fighter}, there's a spider behind you!",
+    "fighter",
+    "WHERE?! Oh... I see it. HYAAA!",
+  ],
+  [
+    "gatherer",
+    "{builder}, catch! *throws logs*",
+    "builder",
+    "Got 'em! Thanks!",
+  ],
+  ["fighter", "{bodyguard}, wanna spar later?", "bodyguard", "You'd lose!"],
+  [
+    "leader",
+    "Good work everyone! We're making progress!",
+    "fighter",
+    "This team is unstoppable!",
+  ],
+  [
+    "builder",
+    "{scout}, what do you see out there?",
+    "scout",
+    "Trees, mountains, and... is that a village?!",
+  ],
+  [
+    "bodyguard",
+    "Stay behind me {leader}!",
+    "leader",
+    "I appreciate the protection!",
+  ],
+  ["scout", "Guys I found a dungeon!", "leader", "Everyone be careful!"],
+  [
+    "gatherer",
+    "I just mined 10 iron ore!",
+    "leader",
+    "That's exactly what we needed!",
+  ],
+  ["fighter", "Nothing can stop us!", "gatherer", "Famous last words..."],
+
+  // Silly conversations
+  [
+    "scout",
+    "Do you think the Ender Dragon is scared of us?",
+    "fighter",
+    "It SHOULD be!",
+  ],
+  [
+    "builder",
+    "What do you guys want for dinner?",
+    "gatherer",
+    "Steak! If I can find a cow...",
+  ],
+  [
+    "bodyguard",
+    "I've been walking for so long my feet hurt",
+    "scout",
+    "You don't even have real feet!",
+  ],
+  [
+    "fighter",
+    "One time I punched a tree and it didn't break",
+    "builder",
+    "That's... that's not how this works.",
+  ],
+  [
+    "leader",
+    "Remember the plan everyone!",
+    "scout",
+    "What plan? I thought we were winging it!",
+  ],
+  [
+    "gatherer",
+    "I accidentally mined into lava...",
+    "fighter",
+    "Are you okay?!",
+    "gatherer",
+    "NO!",
+  ],
+  [
+    "builder",
+    "Can we take a break?",
+    "leader",
+    "The Ender Dragon waits for no one!",
+  ],
+  [
+    "scout",
+    "Hey {bodyguard}, race you to that mountain!",
+    "bodyguard",
+    "I can't leave my post!",
+  ],
+  [
+    "fighter",
+    "I'm bored, someone pick a fight with me",
+    "builder",
+    "No thanks, I choose life.",
+  ],
+  [
+    "leader",
+    "We're in this together, team!",
+    "gatherer",
+    "Aww, that's actually sweet.",
+  ],
+
+  // Panic / combat
+  [
+    "scout",
+    "CREEPER! EVERYONE RUN!",
+    "fighter",
+    "RUN?! I'M RUNNING TOWARD IT!",
+  ],
+  [
+    "bodyguard",
+    "HOSTILE MOB! Protect {leader}!",
+    "fighter",
+    "On it! Cover me!",
+  ],
+  ["gatherer", "I don't have a weapon!!", "bodyguard", "Get behind us!"],
+  ["leader", "Watch out for that skeleton!", "scout", "I see it! On the left!"],
+  ["fighter", "There's too many of them!", "bodyguard", "Just keep swinging!"],
+
+  // Night time
+  ["scout", "It's getting dark...", "leader", "Everyone stay close."],
+  ["builder", "I hear zombies...", "fighter", "Good. I was getting bored."],
+  [
+    "gatherer",
+    "Can we please find a bed?",
+    "bodyguard",
+    "No beds, only vigilance!",
+  ],
+  [
+    "leader",
+    "Night time. Stay alert everyone.",
+    "scout",
+    "I can barely see anything!",
+  ],
+  [
+    "fighter",
+    "Nighttime is fighting time!",
+    "builder",
+    "Nighttime is HIDING time!",
+  ],
+];
+
+/** Messages bots say to each other when someone dies */
+const DEATH_REACTIONS = [
+  [
+    "{dead}! NOOOO!",
+    "{dead} is down! Someone help!",
+    "We lost {dead}!",
+    "Avenge {dead}!",
+  ],
+  [
+    "RIP {dead}...",
+    "{dead} will be remembered.",
+    "Pour one out for {dead}.",
+    "They got {dead}!",
+  ],
+  [
+    "Don't worry {dead}, we'll keep going!",
+    "Come back {dead}, we need you!",
+    "{dead}!! Not like this!",
+  ],
+];
+
+/** Messages when someone respawns */
+const RESPAWN_REACTIONS = [
+  "Welcome back {name}!",
+  "{name} is alive again!",
+  "We missed you {name}!",
+  "{name}! You're back! Don't scare us like that!",
+  "The team is whole again!",
+  "{name} has returned from the dead!",
+  "Good to have you back {name}!",
+];
+
+/** Messages bots say when they kill a mob together */
+const TEAM_KILL_REACTIONS = [
+  "Teamwork!",
+  "Got 'em!",
+  "Nice one!",
+  "High five!",
+  "Another one down!",
+  "Nobody messes with us!",
+  "Too easy when we work together!",
+  "That's how it's done!",
+];
+
+let lastConvoTime = 0;
+const CONVO_COOLDOWN = 12000; // 12 seconds between conversations
+
+/** Start a random conversation between two bots */
+function triggerConversation() {
+  const now = Date.now();
+  if (now - lastConvoTime < CONVO_COOLDOWN) return;
+
+  const livingBots = BOTS_CONFIG.filter((bc) => bots[bc.name]?.entity?.isValid);
+  if (livingBots.length < 2) return;
+
+  const convo = pick(CONVERSATIONS);
+  const speakerRole = convo[0];
+  const speakerLine = convo[1];
+  const replyRole = convo[2];
+  const replyLine = convo[3];
+
+  // Find bots with matching roles, or pick random if no match
+  let speaker = livingBots.find((bc) => bc.role === speakerRole);
+  let replier = livingBots.find(
+    (bc) => bc.role === replyRole && bc.name !== speaker?.name,
+  );
+
+  if (!speaker) speaker = pick(livingBots);
+  if (!replier)
+    replier = pick(livingBots.filter((bc) => bc.name !== speaker.name));
+  if (!speaker || !replier) return;
+
+  const speakerBot = bots[speaker.name];
+  const replierBot = bots[replier.name];
+  if (!speakerBot || !replierBot) return;
+
+  const leaderName =
+    BOTS_CONFIG.find((b) => b.role === "leader")?.name || "FriendlyBot";
+
+  // Replace placeholders
+  const processLine = (line) =>
+    line
+      .replace("{leader}", leaderName)
+      .replace("{fighter}", "BlueHelper1")
+      .replace("{bodyguard}", "RedGuard1")
+      .replace("{scout}", "RedScout")
+      .replace("{gatherer}", "RedGuard2")
+      .replace("{builder}", "BlueHelper2");
+
+  lastConvoTime = now;
+
+  // Speaker says their line
+  speakerBot.chat(processLine(speakerLine));
+
+  // Replier responds after a short delay
+  setTimeout(
+    () => {
+      replierBot.chat(processLine(replyLine));
+
+      // Sometimes a third bot chimes in
+      if (convo.length > 4 && Math.random() < 0.5) {
+        const thirdRole = convo[4];
+        const thirdLine = convo[5];
+        const third = livingBots.find(
+          (bc) =>
+            bc.role === thirdRole &&
+            bc.name !== speaker.name &&
+            bc.name !== replier.name,
+        );
+        if (third && bots[third.name]) {
+          setTimeout(
+            () => bots[third.name].chat(processLine(thirdLine)),
+            1500 + Math.random() * 1500,
+          );
+        }
+      }
+
+      // Random third-party reaction
+      if (Math.random() < 0.25) {
+        const bystander = livingBots.find(
+          (bc) => bc.name !== speaker.name && bc.name !== replier.name,
+        );
+        if (bystander && bots[bystander.name]) {
+          const reactions = [
+            "lol",
+            "haha",
+            "true",
+            "same",
+            "^",
+            "mood",
+            "facts",
+            "that's what I was thinking!",
+            "relatable",
+            "wait what?",
+            "lmaooo",
+            "I heard that!",
+            "are you guys serious rn",
+            "focus everyone!",
+          ];
+          setTimeout(
+            () => bots[bystander.name].chat(pick(reactions)),
+            2000 + Math.random() * 2000,
+          );
+        }
+      }
+    },
+    1000 + Math.random() * 2000,
+  );
+}
+
+/** React to a bot dying */
+function reactToDeath(deadBotName) {
+  const reactions = pick(DEATH_REACTIONS);
+  const living = BOTS_CONFIG.filter(
+    (bc) => bc.name !== deadBotName && bots[bc.name]?.entity?.isValid,
+  );
+
+  // 2-3 bots react
+  const reactors = living
+    .sort(() => Math.random() - 0.5)
+    .slice(0, Math.min(3, living.length));
+  let delay = 500;
+  for (const bc of reactors) {
+    const bot = bots[bc.name];
+    if (!bot) continue;
+    const line = pick(reactions).replace("{dead}", deadBotName);
+    setTimeout(() => bot.chat(line), delay);
+    delay += 800 + Math.random() * 1200;
+  }
+}
+
+/** React to a bot respawning */
+function reactToRespawn(respawnedName) {
+  const living = BOTS_CONFIG.filter(
+    (bc) => bc.name !== respawnedName && bots[bc.name],
+  );
+  const reactor = pick(living);
+  if (reactor && bots[reactor.name]) {
+    const line = pick(RESPAWN_REACTIONS).replace("{name}", respawnedName);
+    setTimeout(
+      () => bots[reactor.name].chat(line),
+      1500 + Math.random() * 2000,
+    );
+  }
 }
 
 // ── Gear kits ───────────────────────────────────────────────────────────
@@ -258,9 +644,7 @@ function giveKit(bot, kitName) {
     bot.chat(`/give ${name} ${kit.chestplate}`);
     bot.chat(`/give ${name} ${kit.leggings}`);
     bot.chat(`/give ${name} ${kit.boots}`);
-    for (const extra of kit.extras) {
-      bot.chat(`/give ${name} ${extra}`);
-    }
+    for (const extra of kit.extras) bot.chat(`/give ${name} ${extra}`);
     setTimeout(() => equipAll(bot), 1500);
   }, 500);
 }
@@ -280,55 +664,62 @@ async function equipAll(bot) {
     const shield = bot.inventory.items().find((it) => it.name === "shield");
     if (shield) await bot.equip(shield, "off-hand");
   } catch {
-    /* equip errors are ok */
+    /* ok */
   }
 }
 
-// ── Dumb AI helpers ─────────────────────────────────────────────────────
+// ── Helpers ─────────────────────────────────────────────────────────────
 
-function maybeDoDumbThing(bot) {
-  if (Math.random() < DUMB_CHANCE) {
-    pick(DUMB_THINGS)(bot);
-    return true;
-  }
-  return false;
-}
-
-function delayedAction(minMs = 500, maxMs = 2000) {
-  const delay = minMs + Math.random() * (maxMs - minMs);
-  return new Promise((resolve) => setTimeout(resolve, delay));
-}
-
-/** Find nearest enemy entity for a bot (opposite team) */
-function findNearestEnemy(bot, teamName) {
-  const enemies = BOTS_CONFIG.filter((b) => b.team !== teamName).map(
-    (b) => b.name,
-  );
+/** Find nearest hostile mob */
+function findNearestHostile(bot, radius = 16) {
+  const hostiles = [
+    "zombie",
+    "skeleton",
+    "spider",
+    "cave_spider",
+    "creeper",
+    "enderman",
+    "witch",
+    "drowned",
+    "husk",
+    "stray",
+    "phantom",
+    "pillager",
+    "vindicator",
+    "blaze",
+    "wither_skeleton",
+    "ghast",
+    "piglin_brute",
+    "slime",
+    "magma_cube",
+  ];
   let nearest = null;
   let nearestDist = Infinity;
-
-  for (const enemyName of enemies) {
-    const player = bot.players[enemyName];
-    if (!player?.entity) continue;
-    const dist = player.entity.position.distanceTo(bot.entity.position);
-    if (dist < nearestDist) {
-      nearest = player.entity;
+  for (const entity of Object.values(bot.entities)) {
+    if (!entity || entity === bot.entity) continue;
+    if (entity.type !== "mob" || !hostiles.includes(entity.name)) continue;
+    const dist = entity.position.distanceTo(bot.entity.position);
+    if (dist < radius && dist < nearestDist) {
+      nearest = entity;
       nearestDist = dist;
     }
   }
   return { entity: nearest, distance: nearestDist };
 }
 
-/** Find nearest teammate entity */
-function findNearestTeammate(bot, teamName) {
-  const mates = BOTS_CONFIG.filter(
-    (b) => b.team === teamName && b.name !== bot.username,
-  ).map((b) => b.name);
+/** Find the leader bot entity */
+function findLeaderEntity(bot) {
+  const leaderName = BOTS_CONFIG.find((b) => b.role === "leader").name;
+  return bot.players[leaderName]?.entity;
+}
+
+/** Find the nearest bot teammate */
+function findNearestTeammate(bot) {
+  const mates = BOT_NAMES.filter((n) => n !== bot.username);
   let nearest = null;
   let nearestDist = Infinity;
-
-  for (const mateName of mates) {
-    const player = bot.players[mateName];
+  for (const name of mates) {
+    const player = bot.players[name];
     if (!player?.entity) continue;
     const dist = player.entity.position.distanceTo(bot.entity.position);
     if (dist < nearestDist) {
@@ -340,159 +731,161 @@ function findNearestTeammate(bot, teamName) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════
-//  RED TEAM AI
+//  BOT AI ROLES (All cooperative now!)
 // ═══════════════════════════════════════════════════════════════════════
 
-/** Red Leader (FriendlyBot) — tries to beat the game, fights back when attacked */
-function setupRedLeader(bot) {
+/** Leader — runs game progression, directs the team */
+function setupLeaderAI(bot) {
   let aiInterval = null;
+  let convoInterval = null;
 
-  bot._battleAI = {
+  bot._coopAI = {
     start() {
-      bot.chat("I'm the leader! Let's beat this game!");
+      bot.chat("Alright team, let's beat Minecraft TOGETHER!");
 
-      // Start game progression
+      // Start progression
       if (bot.friendlyBot?.startProgression) {
-        progressing = true;
         bot.friendlyBot.startProgression();
       }
 
-      // Periodic awareness tick
-      aiInterval = setInterval(() => this.tick(), 4000 + Math.random() * 3000);
+      // Periodic tick
+      aiInterval = setInterval(() => this.tick(), 5000 + Math.random() * 3000);
+
+      // Conversation trigger
+      convoInterval = setInterval(
+        () => triggerConversation(),
+        8000 + Math.random() * 6000,
+      );
     },
 
     async tick() {
       if (maybeDoDumbThing(bot)) return;
 
-      // Chat sometimes
-      if (Math.random() < 0.15) bot.chat(pick(RED_CHATTER));
+      // Announce progress sometimes
+      if (Math.random() < 0.1 && bot.friendlyBot) {
+        const phase = bot.friendlyBot.phase || "start";
+        const lines = [
+          `Current phase: ${phase}. Keep it up team!`,
+          `We're on the "${phase}" phase. Almost there!`,
+          `Progress update: ${phase}. Everyone doing great!`,
+          `Stay focused! We're in the ${phase} phase.`,
+        ];
+        bot.chat(pick(lines));
+      }
 
-      // If enemies are very close, fight back (but a bit slow to react)
-      if (hunting) {
-        const { entity: enemy, distance } = findNearestEnemy(bot, "red");
-        if (enemy && distance < 8) {
-          // 70% chance to actually fight back, 30% panic and run
-          if (Math.random() < 0.7) {
-            bot.chat("They found me! Fighting back!");
-            await delayedAction(300, 800);
-            try {
-              const sword = bot.inventory
-                .items()
-                .find((it) => it.name.includes("sword"));
-              if (sword) await bot.equip(sword, "hand");
-              bot.pvp.attack(enemy);
-            } catch {}
-          } else {
-            bot.chat("AHHH! RUN!");
-            try {
-              const away = bot.entity.position.offset(
-                (Math.random() - 0.5) * 20,
-                0,
-                (Math.random() - 0.5) * 20,
-              );
-              const goal = new goals.GoalNear(away.x, away.y, away.z, 2);
-              bot.pathfinder.setGoal(goal, true);
-            } catch {}
-          }
-        }
+      // Fight back if hostile is very close
+      const { entity: hostile, distance } = findNearestHostile(bot, 6);
+      if (hostile) {
+        bot.chat("Mob near me! Help!");
+        await delayedAction(200, 600);
+        try {
+          const sword = bot.inventory
+            .items()
+            .find((it) => it.name.includes("sword"));
+          if (sword) await bot.equip(sword, "hand");
+          bot.pvp.attack(hostile);
+        } catch {}
       }
     },
 
     stop() {
       if (aiInterval) clearInterval(aiInterval);
+      if (convoInterval) clearInterval(convoInterval);
       aiInterval = null;
+      convoInterval = null;
       bot.pvp.stop();
       bot.pathfinder.stop();
       if (bot.friendlyBot?.stopProgression) bot.friendlyBot.stopProgression();
-      progressing = false;
     },
   };
 }
 
-/** Red Bodyguard — follows the leader, fights enemies that get close */
-function setupRedBodyguard(bot, leaderName) {
+/** Bodyguard — stays near leader, fights anything that threatens them */
+function setupBodyguardAI(bot) {
   let aiInterval = null;
 
-  bot._battleAI = {
+  bot._coopAI = {
     start() {
-      bot.chat(`I'll protect ${leaderName} with my life!`);
-      aiInterval = setInterval(() => this.tick(), 3000 + Math.random() * 4000);
+      bot.chat("I'm on guard duty! Nobody touches the boss!");
+      aiInterval = setInterval(() => this.tick(), 3000 + Math.random() * 3000);
     },
 
     async tick() {
       if (maybeDoDumbThing(bot)) return;
 
-      // Chat sometimes
-      if (Math.random() < 0.1) bot.chat(pick(RED_CHATTER));
-
-      const { entity: enemy, distance: enemyDist } = findNearestEnemy(
+      // Priority 1: Kill hostile mobs near the leader or self
+      const { entity: hostile, distance: hostDist } = findNearestHostile(
         bot,
-        "red",
+        14,
       );
-      const leader = bot.players[leaderName]?.entity;
+      if (hostile) {
+        await delayedAction(200, 800);
 
-      // Priority 1: Fight enemies that are close
-      if (enemy && enemyDist < 12) {
-        // Dumb delay before reacting
-        await delayedAction(200, 1200);
-
-        // Sometimes miss or get confused
-        if (Math.random() < 0.15) {
-          bot.chat("Wait where'd they go??");
+        if (Math.random() < 0.12) {
+          bot.chat("Wait where'd it go??");
           bot.look(Math.random() * Math.PI * 2, 0);
           return;
         }
 
+        const warnings = [
+          `Mob incoming! I got it!`,
+          `Watch out! ${hostile.name}!`,
+          `Hostile spotted! Engaging!`,
+          `Die, ${hostile.name}!`,
+          `${hostile.name}! I'll handle it!`,
+        ];
+        bot.chat(pick(warnings));
         try {
-          bot.chat("Enemy spotted! Attacking!");
           const sword = bot.inventory
             .items()
             .find((it) => it.name.includes("sword"));
           if (sword) await bot.equip(sword, "hand");
-          bot.pvp.attack(enemy);
+          bot.pvp.attack(hostile);
         } catch {}
         return;
       }
 
       // Priority 2: Stay near leader
+      const leader = findLeaderEntity(bot);
       if (leader) {
-        const leaderDist = leader.position.distanceTo(bot.entity.position);
-        if (leaderDist > 12) {
-          try {
-            // Sometimes wander in wrong direction first
-            if (Math.random() < 0.2) {
-              bot.chat("Coming, boss! ...I think you're this way?");
-              const wrongWay = bot.entity.position.offset(
-                (Math.random() - 0.5) * 10,
-                0,
-                (Math.random() - 0.5) * 10,
-              );
-              const wrongGoal = new goals.GoalNear(
-                wrongWay.x,
-                wrongWay.y,
-                wrongWay.z,
-                2,
-              );
-              bot.pathfinder.setGoal(wrongGoal, true);
-              await new Promise((r) => setTimeout(r, 2000));
-            }
-            const goal = new goals.GoalFollow(leader, 4);
-            bot.pathfinder.setGoal(goal, true);
-          } catch {}
+        const dist = leader.position.distanceTo(bot.entity.position);
+        if (dist > 10) {
+          if (Math.random() < 0.2) {
+            bot.chat("Coming boss! ...I think you're this way?");
+            const wrong = bot.entity.position.offset(
+              (Math.random() - 0.5) * 8,
+              0,
+              (Math.random() - 0.5) * 8,
+            );
+            bot.pathfinder.setGoal(
+              new goals.GoalNear(wrong.x, wrong.y, wrong.z, 2),
+              true,
+            );
+            await new Promise((r) => setTimeout(r, 1500));
+          }
+          bot.pathfinder.setGoal(new goals.GoalFollow(leader, 4), true);
+        } else if (Math.random() < 0.05) {
+          const idles = [
+            "*stands guard*",
+            "*looks around alertly*",
+            "All clear for now.",
+            "I got my eye on everything.",
+            "*cracks knuckles*",
+          ];
+          bot.chat(pick(idles));
         }
       } else {
-        // Can't find leader, wander around confused
-        if (Math.random() < 0.5) {
-          bot.chat(`${leaderName}?? Where are you??`);
-        }
+        if (Math.random() < 0.4) bot.chat("FriendlyBot?? Where'd you go??");
+        const wander = bot.entity.position.offset(
+          (Math.random() - 0.5) * 16,
+          0,
+          (Math.random() - 0.5) * 16,
+        );
         try {
-          const wander = bot.entity.position.offset(
-            (Math.random() - 0.5) * 16,
-            0,
-            (Math.random() - 0.5) * 16,
+          bot.pathfinder.setGoal(
+            new goals.GoalNear(wander.x, wander.y, wander.z, 2),
+            true,
           );
-          const goal = new goals.GoalNear(wander.x, wander.y, wander.z, 2);
-          bot.pathfinder.setGoal(goal, true);
         } catch {}
       }
     },
@@ -506,8 +899,8 @@ function setupRedBodyguard(bot, leaderName) {
   };
 }
 
-/** Red Gatherer — tries to help by gathering resources, but gets distracted */
-function setupRedGatherer(bot, leaderName) {
+/** Gatherer — mines nearby resources, brings them to leader */
+function setupGathererAI(bot) {
   let aiInterval = null;
   const GATHER_BLOCKS = [
     "oak_log",
@@ -515,70 +908,66 @@ function setupRedGatherer(bot, leaderName) {
     "spruce_log",
     "coal_ore",
     "iron_ore",
+    "cobblestone",
   ];
 
-  bot._battleAI = {
+  bot._coopAI = {
     start() {
-      bot.chat("I'll get us some supplies... if I remember to.");
+      bot.chat("Resource gathering mode: ON! ...mostly.");
       aiInterval = setInterval(() => this.tick(), 4000 + Math.random() * 5000);
     },
 
     async tick() {
       if (maybeDoDumbThing(bot)) return;
 
-      if (Math.random() < 0.1) bot.chat(pick(RED_CHATTER));
-
-      const { entity: enemy, distance: enemyDist } = findNearestEnemy(
+      // Fight hostiles if they're close (reluctantly)
+      const { entity: hostile, distance: hostDist } = findNearestHostile(
         bot,
-        "red",
+        8,
       );
-
-      // Fight if enemy is close
-      if (enemy && enemyDist < 10) {
+      if (hostile) {
         await delayedAction(400, 1500);
-
-        // 40% chance to panic instead of fight
-        if (Math.random() < 0.4) {
-          bot.chat("ENEMY! I'M NOT A FIGHTER!");
+        if (Math.random() < 0.35) {
+          bot.chat("AHHH! Someone help!! A " + hostile.name + "!");
+          const away = bot.entity.position.offset(
+            (Math.random() - 0.5) * 20,
+            0,
+            (Math.random() - 0.5) * 20,
+          );
           try {
-            const away = bot.entity.position.offset(
-              (Math.random() - 0.5) * 25,
-              0,
-              (Math.random() - 0.5) * 25,
+            bot.pathfinder.setGoal(
+              new goals.GoalNear(away.x, away.y, away.z, 2),
+              true,
             );
-            const goal = new goals.GoalNear(away.x, away.y, away.z, 2);
-            bot.pathfinder.setGoal(goal, true);
           } catch {}
           return;
         }
-
+        bot.chat("Fine I'll fight! *swings wildly*");
         try {
-          bot.chat("Fine, I'll fight! *swings wildly*");
           const sword = bot.inventory
             .items()
             .find((it) => it.name.includes("sword"));
           if (sword) await bot.equip(sword, "hand");
-          bot.pvp.attack(enemy);
+          bot.pvp.attack(hostile);
         } catch {}
         return;
       }
 
-      // Stay near leader if too far
-      const leader = bot.players[leaderName]?.entity;
+      // Stay near leader
+      const leader = findLeaderEntity(bot);
       if (leader) {
         const leaderDist = leader.position.distanceTo(bot.entity.position);
         if (leaderDist > 25) {
-          bot.chat("Wait up guys!");
+          bot.chat("Wait up everyone! I'm falling behind!");
           try {
-            const goal = new goals.GoalFollow(leader, 6);
-            bot.pathfinder.setGoal(goal, true);
+            bot.pathfinder.setGoal(new goals.GoalFollow(leader, 6), true);
           } catch {}
           return;
         }
       }
 
-      // Try to mine something nearby (dumbly)
-      if (Math.random() < 0.6) {
+      // Mine stuff
+      if (Math.random() < 0.65) {
         try {
           const mcData = (await import("minecraft-data")).default(bot.version);
           const blockName = pick(GATHER_BLOCKS);
@@ -587,32 +976,41 @@ function setupRedGatherer(bot, leaderName) {
             maxDistance: 16,
           });
           if (block) {
-            bot.chat(`Ooh, ${blockName}! I'll grab that.`);
-            const goal = new goals.GoalNear(
-              block.position.x,
-              block.position.y,
-              block.position.z,
-              1,
+            const announcements = [
+              `Ooh, ${blockName}! Dibs!`,
+              `Found some ${blockName}!`,
+              `I see ${blockName}, grabbing it!`,
+              `${blockName}! That'll be useful!`,
+            ];
+            bot.chat(pick(announcements));
+            await bot.pathfinder.goto(
+              new goals.GoalNear(
+                block.position.x,
+                block.position.y,
+                block.position.z,
+                1,
+              ),
             );
-            await bot.pathfinder.goto(goal);
             await bot.dig(block);
-            bot.chat("Got it!");
+            if (Math.random() < 0.3) bot.chat("Got it! You're welcome, team!");
           } else {
-            bot.chat("I don't see anything good nearby...");
+            if (Math.random() < 0.3) bot.chat("Nothing good to mine nearby...");
           }
         } catch {
-          if (Math.random() < 0.5) bot.chat("Ugh, I can't reach it!");
+          if (Math.random() < 0.4) bot.chat("Ugh, I can't reach that block!");
         }
       } else {
-        // Wander around
+        // Wander near group
+        const wander = bot.entity.position.offset(
+          (Math.random() - 0.5) * 12,
+          0,
+          (Math.random() - 0.5) * 12,
+        );
         try {
-          const wander = bot.entity.position.offset(
-            (Math.random() - 0.5) * 20,
-            0,
-            (Math.random() - 0.5) * 20,
+          bot.pathfinder.setGoal(
+            new goals.GoalNear(wander.x, wander.y, wander.z, 2),
+            true,
           );
-          const goal = new goals.GoalNear(wander.x, wander.y, wander.z, 2);
-          bot.pathfinder.setGoal(goal, true);
         } catch {}
       }
     },
@@ -626,180 +1024,211 @@ function setupRedGatherer(bot, leaderName) {
   };
 }
 
-// ═══════════════════════════════════════════════════════════════════════
-//  BLUE TEAM AI
-// ═══════════════════════════════════════════════════════════════════════
-
-/** Blue Hunter — aggressively chases the nearest Red team member */
-function setupBlueHunter(bot) {
+/** Scout — runs ahead of the group, reports back about mobs and points of interest */
+function setupScoutAI(bot) {
   let aiInterval = null;
 
-  bot._battleAI = {
+  bot._coopAI = {
     start() {
-      bot.chat("Time to hunt! Red team is going DOWN!");
-      aiInterval = setInterval(() => this.tick(), 2500 + Math.random() * 3000);
-    },
-
-    async tick() {
-      if (!hunting) return;
-      if (maybeDoDumbThing(bot)) return;
-
-      if (Math.random() < 0.12) bot.chat(pick(BLUE_CHATTER));
-
-      const { entity: enemy, distance } = findNearestEnemy(bot, "blue");
-
-      if (!enemy) {
-        // Can't find anyone, wander around looking
-        if (Math.random() < 0.4) bot.chat("Where are they hiding?!");
-        try {
-          const wander = bot.entity.position.offset(
-            (Math.random() - 0.5) * 30,
-            0,
-            (Math.random() - 0.5) * 30,
-          );
-          const goal = new goals.GoalNear(wander.x, wander.y, wander.z, 2);
-          bot.pathfinder.setGoal(goal, true);
-        } catch {}
-        return;
-      }
-
-      // Dumb reaction time
-      await delayedAction(200, 1000);
-
-      if (distance < 5) {
-        // Close enough to attack
-        // Sometimes swing at air first
-        if (Math.random() < 0.2) {
-          bot.chat("Take this! *misses*");
-          bot.swingArm("hand");
-          await new Promise((r) => setTimeout(r, 500));
-        }
-
-        try {
-          const sword = bot.inventory
-            .items()
-            .find((it) => it.name.includes("sword"));
-          if (sword) await bot.equip(sword, "hand");
-          bot.pvp.attack(enemy);
-        } catch {}
-      } else if (distance < 40) {
-        // Chase them
-        if (Math.random() < 0.3) bot.chat("I see you! Get over here!");
-        try {
-          const goal = new goals.GoalFollow(enemy, 2);
-          bot.pathfinder.setGoal(goal, true);
-        } catch {}
-      } else {
-        // Too far, wander toward center
-        try {
-          const wander = bot.entity.position.offset(
-            (Math.random() - 0.5) * 20,
-            0,
-            (Math.random() - 0.5) * 20,
-          );
-          const goal = new goals.GoalNear(wander.x, wander.y, wander.z, 2);
-          bot.pathfinder.setGoal(goal, true);
-        } catch {}
-      }
-    },
-
-    stop() {
-      if (aiInterval) clearInterval(aiInterval);
-      aiInterval = null;
-      bot.pvp.stop();
-      bot.pathfinder.stop();
-    },
-  };
-}
-
-/** Blue Flanker — tries to sneak up on Red team from behind */
-function setupBlueFlanker(bot) {
-  let aiInterval = null;
-
-  bot._battleAI = {
-    start() {
-      bot.chat("I'll sneak around and get them from behind...");
+      bot.chat("I'll scout ahead! *runs off excitedly*");
       aiInterval = setInterval(() => this.tick(), 3500 + Math.random() * 4000);
     },
 
     async tick() {
-      if (!hunting) return;
       if (maybeDoDumbThing(bot)) return;
 
-      if (Math.random() < 0.1) bot.chat(pick(BLUE_CHATTER));
+      const leader = findLeaderEntity(bot);
+      const { entity: hostile, distance: hostDist } = findNearestHostile(
+        bot,
+        20,
+      );
 
-      const { entity: enemy, distance } = findNearestEnemy(bot, "blue");
-      const { entity: teammate } = findNearestTeammate(bot, "blue");
+      // Report hostiles
+      if (hostile && hostDist < 20) {
+        const warnings = [
+          `Heads up! ${hostile.name} spotted ${Math.round(hostDist)} blocks away!`,
+          `I see a ${hostile.name}! Everyone be careful!`,
+          `Warning: ${hostile.name} nearby!`,
+          `GUYS! There's a ${hostile.name} over here!`,
+          `${hostile.name} alert!! About ${Math.round(hostDist)} blocks out!`,
+        ];
+        bot.chat(pick(warnings));
 
-      if (!enemy) {
-        if (Math.random() < 0.3) bot.chat("*sneaks around looking*");
-        try {
-          bot.setControlState("sneak", true);
-          const wander = bot.entity.position.offset(
-            (Math.random() - 0.5) * 25,
-            0,
-            (Math.random() - 0.5) * 25,
-          );
-          const goal = new goals.GoalNear(wander.x, wander.y, wander.z, 2);
-          bot.pathfinder.setGoal(goal, true);
-          setTimeout(() => bot.setControlState("sneak", false), 3000);
-        } catch {}
-        return;
+        // Fight if very close
+        if (hostDist < 6) {
+          await delayedAction(200, 800);
+          try {
+            const sword = bot.inventory
+              .items()
+              .find((it) => it.name.includes("sword"));
+            if (sword) await bot.equip(sword, "hand");
+            bot.pvp.attack(hostile);
+          } catch {}
+          return;
+        }
       }
 
-      // Dumb reaction time
-      await delayedAction(300, 1500);
-
-      if (distance < 5) {
-        if (Math.random() < 0.3) {
-          bot.chat("SURPRISE ATTACK!");
+      // Stay somewhat ahead of the leader but not too far
+      if (leader) {
+        const dist = leader.position.distanceTo(bot.entity.position);
+        if (dist > 30) {
+          bot.chat("Oops, I went too far! Coming back!");
+          try {
+            bot.pathfinder.setGoal(new goals.GoalFollow(leader, 8), true);
+          } catch {}
+        } else if (dist < 8) {
+          // Run ahead!
+          const ahead = leader.position.offset(
+            (Math.random() - 0.5) * 20 + 10,
+            0,
+            (Math.random() - 0.5) * 20 + 10,
+          );
+          if (Math.random() < 0.3) bot.chat("Scouting ahead!");
+          try {
+            bot.pathfinder.setGoal(
+              new goals.GoalNear(ahead.x, ahead.y, ahead.z, 2),
+              true,
+            );
+          } catch {}
         }
-        bot.setControlState("sneak", false);
 
-        // Sometimes fumble the weapon
+        // Report interesting things
+        if (Math.random() < 0.08) {
+          const reports = [
+            "I see a village in the distance!",
+            "There's a ravine over here!",
+            "Found a cave entrance!",
+            "I see water ahead!",
+            "There's a mountain this way!",
+            "Looks clear ahead!",
+            "The terrain opens up over here!",
+            "I see animals nearby!",
+            "There's a lava pool — watch out!",
+            "Looks like a flat area for building!",
+          ];
+          bot.chat(pick(reports));
+        }
+      } else {
+        if (Math.random() < 0.4) bot.chat("I... I think I'm lost. Help?");
+        const wander = bot.entity.position.offset(
+          (Math.random() - 0.5) * 15,
+          0,
+          (Math.random() - 0.5) * 15,
+        );
+        try {
+          bot.pathfinder.setGoal(
+            new goals.GoalNear(wander.x, wander.y, wander.z, 2),
+            true,
+          );
+        } catch {}
+      }
+    },
+
+    stop() {
+      if (aiInterval) clearInterval(aiInterval);
+      aiInterval = null;
+      bot.pvp.stop();
+      bot.pathfinder.stop();
+    },
+  };
+}
+
+/** Fighter — actively hunts hostile mobs around the group */
+function setupFighterAI(bot) {
+  let aiInterval = null;
+
+  bot._coopAI = {
+    start() {
+      bot.chat("Any mobs around here? I'm ready to fight!");
+      aiInterval = setInterval(() => this.tick(), 2500 + Math.random() * 3000);
+    },
+
+    async tick() {
+      if (maybeDoDumbThing(bot)) return;
+
+      // Priority 1: Hunt hostiles (LOVES fighting)
+      const { entity: hostile, distance: hostDist } = findNearestHostile(
+        bot,
+        18,
+      );
+      if (hostile) {
+        await delayedAction(100, 600);
+
+        // Sometimes swing at air
         if (Math.random() < 0.15) {
-          bot.chat("Wait, where's my sword?!");
-          await new Promise((r) => setTimeout(r, 1000));
+          bot.chat(`Take this, ${hostile.name}! *misses*`);
+          bot.swingArm("hand");
+          await new Promise((r) => setTimeout(r, 400));
         }
+
+        const battleCries = [
+          `${hostile.name}! You're MINE!`,
+          `Come here ${hostile.name}!`,
+          `HYAAAA! *charges at ${hostile.name}*`,
+          `Eat sword, ${hostile.name}!`,
+          `I've been waiting for this!`,
+          `Finally some action!`,
+          `${hostile.name}? More like DEAD ${hostile.name}!`,
+        ];
+        bot.chat(pick(battleCries));
 
         try {
           const sword = bot.inventory
             .items()
             .find((it) => it.name.includes("sword"));
           if (sword) await bot.equip(sword, "hand");
-          bot.pvp.attack(enemy);
+          bot.pvp.attack(hostile);
         } catch {}
-      } else if (distance < 30) {
-        // Try to go around the enemy (flank)
-        try {
-          const offset = teammate
-            ? enemy.position.minus(teammate.position).normalize().scaled(5)
-            : enemy.position
-                .offset(
-                  (Math.random() - 0.5) * 10,
-                  0,
-                  (Math.random() - 0.5) * 10,
-                )
-                .minus(enemy.position);
 
-          const flankPos = enemy.position.plus(offset);
-          const goal = new goals.GoalNear(
-            flankPos.x,
-            flankPos.y,
-            flankPos.z,
-            2,
-          );
-          bot.pathfinder.setGoal(goal, true);
-
-          if (Math.random() < 0.2) {
-            bot.setControlState("sneak", true);
-            setTimeout(() => bot.setControlState("sneak", false), 4000);
+        // Other bots cheer sometimes
+        if (Math.random() < 0.3) {
+          const others = BOTS_CONFIG.filter((bc) => bc.name !== bot.username);
+          const cheerBot = bots[pick(others).name];
+          if (cheerBot) {
+            setTimeout(
+              () => cheerBot.chat(pick(TEAM_KILL_REACTIONS)),
+              1500 + Math.random() * 2000,
+            );
           }
-        } catch {
+        }
+        return;
+      }
+
+      // Priority 2: Stay with the group
+      const leader = findLeaderEntity(bot);
+      if (leader) {
+        const dist = leader.position.distanceTo(bot.entity.position);
+        if (dist > 16) {
+          if (Math.random() < 0.3) bot.chat("No mobs? Fine, I'll regroup...");
           try {
-            const goal = new goals.GoalFollow(enemy, 2);
-            bot.pathfinder.setGoal(goal, true);
+            bot.pathfinder.setGoal(new goals.GoalFollow(leader, 5), true);
           } catch {}
+        } else {
+          // Patrol around the group
+          if (Math.random() < 0.5) {
+            const patrol = leader.position.offset(
+              (Math.random() - 0.5) * 14,
+              0,
+              (Math.random() - 0.5) * 14,
+            );
+            try {
+              bot.pathfinder.setGoal(
+                new goals.GoalNear(patrol.x, patrol.y, patrol.z, 2),
+                true,
+              );
+            } catch {}
+          }
+          if (Math.random() < 0.06) {
+            const bored = [
+              "Any mobs? Anyone? No?",
+              "*practices sword swings*",
+              "Come on, something attack us!",
+              "I'm getting bored over here!",
+              "*looks for trouble*",
+              "This is way too quiet...",
+            ];
+            bot.chat(pick(bored));
+          }
         }
       }
     },
@@ -809,7 +1238,121 @@ function setupBlueFlanker(bot) {
       aiInterval = null;
       bot.pvp.stop();
       bot.pathfinder.stop();
-      bot.setControlState("sneak", false);
+    },
+  };
+}
+
+/** Builder — follows leader closely, does odd jobs, helps with anything */
+function setupBuilderAI(bot) {
+  let aiInterval = null;
+
+  bot._coopAI = {
+    start() {
+      bot.chat("I'm here to help with anything! Just say the word!");
+      aiInterval = setInterval(() => this.tick(), 4000 + Math.random() * 4000);
+    },
+
+    async tick() {
+      if (maybeDoDumbThing(bot)) return;
+
+      // Fight if necessary (reluctantly)
+      const { entity: hostile, distance: hostDist } = findNearestHostile(
+        bot,
+        8,
+      );
+      if (hostile) {
+        await delayedAction(300, 1200);
+        if (Math.random() < 0.25) {
+          bot.chat("Why is it always ME who finds the mobs?!");
+        } else {
+          bot.chat(`I'll try... ${hostile.name} here goes nothing!`);
+        }
+        try {
+          const sword = bot.inventory
+            .items()
+            .find((it) => it.name.includes("sword"));
+          if (sword) await bot.equip(sword, "hand");
+          bot.pvp.attack(hostile);
+        } catch {}
+        return;
+      }
+
+      // Stay close to leader
+      const leader = findLeaderEntity(bot);
+      if (leader) {
+        const dist = leader.position.distanceTo(bot.entity.position);
+        if (dist > 12) {
+          if (Math.random() < 0.2) bot.chat("Wait for me!");
+          try {
+            bot.pathfinder.setGoal(new goals.GoalFollow(leader, 4), true);
+          } catch {}
+        } else {
+          // Comment on things
+          if (Math.random() < 0.06) {
+            const comments = [
+              "This would be a great spot for a house!",
+              "I could build something cool here.",
+              "*picks up random block*",
+              "Anyone need anything built?",
+              "Following the leader, following the leader~",
+              "What a nice day for an adventure!",
+              "I wonder what the Ender Dragon looks like up close...",
+              "Are we there yet?",
+              "My feet hurt but I'm having fun!",
+            ];
+            bot.chat(pick(comments));
+          }
+
+          // Sometimes pick up nearby items or mine stuff
+          if (Math.random() < 0.2) {
+            try {
+              const mcData = (await import("minecraft-data")).default(
+                bot.version,
+              );
+              const block = bot.findBlock({
+                matching: [
+                  mcData.blocksByName["oak_log"]?.id,
+                  mcData.blocksByName["birch_log"]?.id,
+                  mcData.blocksByName["spruce_log"]?.id,
+                ].filter(Boolean),
+                maxDistance: 8,
+              });
+              if (block) {
+                bot.chat("I'll grab this log real quick!");
+                await bot.pathfinder.goto(
+                  new goals.GoalNear(
+                    block.position.x,
+                    block.position.y,
+                    block.position.z,
+                    1,
+                  ),
+                );
+                await bot.dig(block);
+              }
+            } catch {}
+          }
+        }
+      } else {
+        if (Math.random() < 0.3) bot.chat("Guys? Where is everyone?");
+        const wander = bot.entity.position.offset(
+          (Math.random() - 0.5) * 12,
+          0,
+          (Math.random() - 0.5) * 12,
+        );
+        try {
+          bot.pathfinder.setGoal(
+            new goals.GoalNear(wander.x, wander.y, wander.z, 2),
+            true,
+          );
+        } catch {}
+      }
+    },
+
+    stop() {
+      if (aiInterval) clearInterval(aiInterval);
+      aiInterval = null;
+      bot.pvp.stop();
+      bot.pathfinder.stop();
     },
   };
 }
@@ -819,24 +1362,20 @@ function setupBlueFlanker(bot) {
 // ═══════════════════════════════════════════════════════════════════════
 
 function spawnBot(botConfig) {
-  const { name, team, role, color } = botConfig;
+  const { name, role, color } = botConfig;
   const isLeader = role === "leader";
 
-  const opts = {
+  const bot = mineflayer.createBot({
     username: name,
     host: HOST,
     port: PORT,
     version: VERSION,
-  };
+  });
 
-  const bot = mineflayer.createBot(opts);
-
-  // Load plugins
   bot.loadPlugin(pathfinder);
   bot.loadPlugin(pvp);
   bot.loadPlugin(armorManager);
 
-  // Leader gets the full FriendlyBot plugin stack
   if (isLeader) {
     bot.loadPlugin(collectBlock);
     bot.loadPlugin(autoEat);
@@ -844,16 +1383,12 @@ function spawnBot(botConfig) {
   }
 
   bot.once("spawn", () => {
-    console.log(
-      `${color}[${team.toUpperCase()}] ${name} spawned! (${role})\x1b[0m`,
-    );
+    console.log(`${color}[SPAWN] ${name} joined! (${role})\x1b[0m`);
 
-    // Setup pathfinder
     const defaultMove = new Movements(bot);
-    defaultMove.canDig = isLeader; // Only leader can dig (for progression)
+    defaultMove.canDig = isLeader || role === "gatherer";
     bot.pathfinder.setMovements(defaultMove);
 
-    // If this is the leader, set up full FriendlyBot state
     if (isLeader) {
       bot.friendlyBot = {
         config,
@@ -877,42 +1412,50 @@ function spawnBot(botConfig) {
     }
 
     bots[name] = bot;
-    bot.chat(`${name} reporting for duty! Team ${team.toUpperCase()}!`);
+
+    const greetings = [
+      `${name} here! Ready to go!`,
+      `${name} reporting for duty!`,
+      `${name} has arrived! Let's do this!`,
+      `Yo it's ${name}! What's up everyone!`,
+      `${name} checking in! What's the plan?`,
+    ];
+    bot.chat(pick(greetings));
 
     readyCount++;
     if (readyCount >= BOTS_CONFIG.length) {
-      initializeBattle();
+      setTimeout(() => initializeCoOp(), 1500);
     }
   });
 
-  // Death handling
+  // Death handling — teammates react
   bot.on("death", () => {
-    console.log(`${color}[${team.toUpperCase()}] ${name} died!\x1b[0m`);
+    console.log(`${color}[DEATH] ${name} died!\x1b[0m`);
+    bot.chat(
+      pick([
+        "Ow... that hurt...",
+        "I'll be back!",
+        "Not like this...",
+        "Tell the team... I tried...",
+        "Respawning!",
+        "x_x",
+        "I blame lag!",
+        "That was totally unfair!",
+        "Nooooo!",
+      ]),
+    );
+    reactToDeath(name);
+  });
 
-    if (hunting || progressing) {
-      if (team === "red") {
-        score.blue++;
-      } else {
-        score.red++;
-      }
-
-      // Announce
-      setTimeout(() => {
-        bot.chat(pick(DEATH_LINES));
-        // Find a living enemy to gloat
-        const enemyTeam = team === "red" ? "blue" : "red";
-        const gloater = BOTS_CONFIG.find((c) => c.team === enemyTeam);
-        if (gloater && bots[gloater.name]) {
-          bots[gloater.name].chat(pick(KILL_LINES));
-          bots[gloater.name].chat(
-            `Score: Red ${score.red} - Blue ${score.blue}`,
-          );
-        }
-      }, 1500);
+  // Respawn — teammates welcome back
+  bot.on("spawn", () => {
+    if (bots[name]) {
+      // Only on RE-spawn
+      reactToRespawn(name);
     }
   });
 
-  // Eat food when low (for all bots)
+  // Eat when low hp
   bot.on("health", () => {
     if (bot.health < 10) {
       const food = bot.inventory
@@ -923,36 +1466,59 @@ function spawnBot(botConfig) {
             it.name.includes("golden_apple") ||
             it.name.includes("bread"),
         );
-      if (food) {
+      if (food)
         bot
           .equip(food, "hand")
           .then(() => bot.consume())
           .catch(() => {});
-      }
     }
   });
 
-  // Random hurt reactions
+  // Hurt reactions + team awareness
   bot.on("entityHurt", (entity) => {
     if (entity !== bot.entity) return;
-    if (Math.random() < 0.3) {
-      const reactions = [
-        "Ow!",
-        "Hey!",
-        "That hurt!",
-        "Ouch!",
-        "Watch it!",
-        "Oof!",
-        "*screams*",
-      ];
-      bot.chat(pick(reactions));
+    if (Math.random() < 0.35) {
+      bot.chat(
+        pick([
+          "Ow!",
+          "Hey!",
+          "Ouch!",
+          "I'm hit!",
+          "Help!",
+          "Oof!",
+          "*screams*",
+          "That stings!",
+        ]),
+      );
     }
     // Dumb dodge
-    if (Math.random() < 0.3) {
-      const yaw = bot.entity.yaw + (Math.random() > 0.5 ? 1.5 : -1.5);
-      bot.look(yaw, 0);
+    if (Math.random() < 0.25) {
+      bot.look(bot.entity.yaw + (Math.random() > 0.5 ? 1.5 : -1.5), 0);
       bot.setControlState(Math.random() > 0.5 ? "left" : "right", true);
-      setTimeout(() => bot.clearControlStates(), 300 + Math.random() * 500);
+      setTimeout(() => bot.clearControlStates(), 300 + Math.random() * 400);
+    }
+    // Nearby teammate reacts
+    if (Math.random() < 0.3) {
+      const nearby = BOTS_CONFIG.find((bc) => {
+        if (bc.name === name) return false;
+        const b = bots[bc.name];
+        return b?.entity?.position?.distanceTo(bot.entity.position) < 15;
+      });
+      if (nearby && bots[nearby.name]) {
+        setTimeout(
+          () => {
+            bots[nearby.name].chat(
+              pick([
+                `Hang on ${name}!`,
+                `I'll help you ${name}!`,
+                `${name}! Are you okay?!`,
+                `They hit ${name}!`,
+              ]),
+            );
+          },
+          500 + Math.random() * 1000,
+        );
+      }
     }
   });
 
@@ -968,55 +1534,107 @@ function spawnBot(botConfig) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════
-//  BATTLE INITIALIZATION
+//  INITIALIZATION
 // ═══════════════════════════════════════════════════════════════════════
 
-function initializeBattle() {
-  console.log("\n\x1b[32m[Battle] All 5 bots ready!\x1b[0m");
+function initializeCoOp() {
   console.log(
-    '\x1b[32m[Battle] Say "fight" to start hunting, "beat" for Red to start progression!\x1b[0m\n',
+    "\n\x1b[32m[Co-op] All 6 bots ready! The squad is assembled!\x1b[0m",
+  );
+  console.log(
+    '\x1b[32m[Co-op] Say "go" or "beat" in-game to start the adventure!\x1b[0m\n',
   );
 
   const leaderName = BOTS_CONFIG.find((b) => b.role === "leader").name;
   const leader = bots[leaderName];
 
-  // Setup AI for each bot
-  setupRedLeader(leader);
-
+  // Set up AI for each role
   for (const bc of BOTS_CONFIG) {
     const bot = bots[bc.name];
     if (!bot) continue;
 
-    if (bc.role === "bodyguard") {
-      setupRedBodyguard(bot, leaderName);
-    } else if (bc.role === "gatherer") {
-      setupRedGatherer(bot, leaderName);
-    } else if (bc.role === "hunter") {
-      setupBlueHunter(bot);
-    } else if (bc.role === "flanker") {
-      setupBlueFlanker(bot);
+    switch (bc.role) {
+      case "leader":
+        setupLeaderAI(bot);
+        break;
+      case "bodyguard":
+        setupBodyguardAI(bot);
+        break;
+      case "gatherer":
+        setupGathererAI(bot);
+        break;
+      case "scout":
+        setupScoutAI(bot);
+        break;
+      case "fighter":
+        setupFighterAI(bot);
+        break;
+      case "builder":
+        setupBuilderAI(bot);
+        break;
     }
   }
 
-  // Listen for chat commands on ONE bot
-  leader.on("chat", (username, message) => {
-    // Ignore any bot's own messages
-    if (BOTS_CONFIG.some((b) => b.name === username)) return;
+  // Team introduction conversation
+  setTimeout(() => {
+    leader.chat("Alright everyone, roll call! Sound off!");
+    let d = 1500;
+    for (const bc of BOTS_CONFIG.filter((b) => b.role !== "leader")) {
+      const b = bots[bc.name];
+      if (!b) continue;
+      const intros = {
+        bodyguard: `${bc.name} here! I'll keep you safe, boss!`,
+        gatherer: `${bc.name} reporting! I'll get us resources!`,
+        scout: `${bc.name} ready! I'll run ahead and scout!`,
+        fighter: `${bc.name} locked and loaded! Point me at something to fight!`,
+        builder: `${bc.name} here! I'll help with whatever you need!`,
+      };
+      setTimeout(() => b.chat(intros[bc.role] || `${bc.name} here!`), d);
+      d += 1200 + Math.random() * 800;
+    }
+    setTimeout(
+      () =>
+        leader.chat('Perfect! Now let\'s beat Minecraft! Say "go" to start!'),
+      d + 500,
+    );
+  }, 2000);
 
+  // Chat command listener
+  leader.on("chat", (username, message) => {
+    if (BOT_NAMES.includes(username)) return;
     const msg = message.trim().toLowerCase();
 
-    if (msg === "fight") {
-      startHunting();
+    if (msg === "go" || msg === "beat") {
+      startAdventure();
     } else if (msg === "stop") {
       stopAll();
-    } else if (msg === "beat") {
-      startProgression();
-    } else if (msg === "score") {
-      leader.chat(`Score: Red ${score.red} - Blue ${score.blue}`);
+    } else if (msg === "regroup") {
+      regroupAll(username);
+    } else if (msg === "status") {
+      showStatus();
     } else if (msg === "reset") {
       resetAll();
     } else if (msg === "quit") {
-      leader.chat("GG everyone!");
+      leader.chat("GG squad! Until next time!");
+      const others = BOTS_CONFIG.filter((b) => b.role !== "leader");
+      let d = 500;
+      for (const bc of others) {
+        setTimeout(
+          () =>
+            bots[bc.name]?.chat(
+              pick([
+                "GG!",
+                "Was fun!",
+                "Later everyone!",
+                "Bye!",
+                "See ya!",
+                "Peace out!",
+              ]),
+            ),
+          d,
+        );
+        d += 400;
+      }
       setTimeout(() => {
         for (const bot of Object.values(bots)) {
           try {
@@ -1024,67 +1642,115 @@ function initializeBattle() {
           } catch {}
         }
         process.exit(0);
-      }, 1000);
-    } else if (msg === "arm red") {
-      for (const bc of BOTS_CONFIG.filter((b) => b.team === "red")) {
-        if (bots[bc.name]) giveKit(bots[bc.name], "random");
-      }
-    } else if (msg === "arm blue") {
-      for (const bc of BOTS_CONFIG.filter((b) => b.team === "blue")) {
-        if (bots[bc.name]) giveKit(bots[bc.name], "random");
-      }
+      }, d + 500);
     } else if (msg === "arm") {
       for (const bot of Object.values(bots)) giveKit(bot, "random");
     } else if (msg.startsWith("kit ")) {
       const kitName = msg.split(" ")[1];
       if (KITS[kitName]) {
         for (const bot of Object.values(bots)) giveKit(bot, kitName);
-        leader.chat(`${kitName} kit for everyone!`);
+        leader.chat(`${kitName} kit for the whole squad!`);
       } else {
-        leader.chat(`Unknown kit. Available: stone, iron, diamond, netherite`);
+        leader.chat("Available kits: stone, iron, diamond, netherite");
       }
     }
   });
 }
 
-function startHunting() {
-  if (hunting) return;
-  hunting = true;
+function startAdventure() {
+  if (active) return;
+  active = true;
+
+  // Dramatic startup
+  const leader = bots[BOTS_CONFIG[0].name];
+  leader?.chat("LET'S GOOO! Adventure time!");
+
+  let d = 800;
+  for (const bc of BOTS_CONFIG.filter((b) => b.role !== "leader")) {
+    const b = bots[bc.name];
+    if (!b) continue;
+    const cheers = [
+      "YEAH!",
+      "Let's go!",
+      "Woo!",
+      "Finally!",
+      "HYPED!",
+      "Adventure!!",
+    ];
+    setTimeout(() => b.chat(pick(cheers)), d);
+    d += 400 + Math.random() * 400;
+  }
 
   // Start all AIs
-  for (const bc of BOTS_CONFIG) {
-    bots[bc.name]?._battleAI?.start();
-  }
-
-  bots[BOTS_CONFIG[0].name]?.chat("Blue team is coming! Everyone watch out!");
-  bots[BOTS_CONFIG[3].name]?.chat("Here we come, Red team!");
-}
-
-function startProgression() {
-  if (progressing) return;
-  const leader = bots[BOTS_CONFIG[0].name];
-
-  // Start the leader's full AI (includes progression)
-  leader._battleAI?.start();
-
-  // Start guards too
-  for (const bc of BOTS_CONFIG.filter(
-    (b) => b.team === "red" && b.role !== "leader",
-  )) {
-    bots[bc.name]?._battleAI?.start();
-  }
+  setTimeout(() => {
+    for (const bc of BOTS_CONFIG) {
+      bots[bc.name]?._coopAI?.start();
+    }
+  }, d);
 }
 
 function stopAll() {
-  hunting = false;
-  progressing = false;
-
+  active = false;
   for (const bot of Object.values(bots)) {
-    bot._battleAI?.stop();
+    bot._coopAI?.stop();
     bot.clearControlStates();
   }
+  bots[BOTS_CONFIG[0].name]?.chat("Everyone stop! Taking a break.");
+  setTimeout(() => {
+    const bc = pick(BOTS_CONFIG.filter((b) => b.role !== "leader"));
+    bots[bc.name]?.chat(
+      pick([
+        "Finally a break!",
+        "My legs needed rest.",
+        "Break time!",
+        "Thank goodness.",
+      ]),
+    );
+  }, 1000);
+}
 
-  bots[BOTS_CONFIG[0].name]?.chat("Everyone stand down.");
+function regroupAll(playerName) {
+  const leader = bots[BOTS_CONFIG[0].name];
+  leader?.chat("Everyone regroup!");
+
+  for (const bc of BOTS_CONFIG) {
+    const bot = bots[bc.name];
+    if (!bot) continue;
+    const player = bot.players[playerName]?.entity;
+    if (player) {
+      try {
+        bot.pathfinder.setGoal(new goals.GoalFollow(player, 3), true);
+      } catch {}
+    }
+  }
+
+  setTimeout(() => {
+    const bc = pick(BOTS_CONFIG.filter((b) => b.role !== "leader"));
+    bots[bc.name]?.chat("Coming!");
+  }, 500);
+  setTimeout(() => {
+    const bc = pick(BOTS_CONFIG.filter((b) => b.role !== "leader"));
+    bots[bc.name]?.chat("On my way!");
+  }, 1200);
+}
+
+function showStatus() {
+  const leader = bots[BOTS_CONFIG[0].name];
+  if (!leader) return;
+
+  const phase = leader.friendlyBot?.phase || "idle";
+  leader.chat(`=== SQUAD STATUS === Phase: ${phase}`);
+
+  for (const bc of BOTS_CONFIG) {
+    const bot = bots[bc.name];
+    if (!bot?.entity) {
+      leader.chat(`  ${bc.name} (${bc.role}): OFFLINE`);
+      continue;
+    }
+    const hp = Math.round(bot.health || 0);
+    const food = Math.round(bot.food || 0);
+    leader.chat(`  ${bc.name} (${bc.role}): HP ${hp}/20 Food ${food}/20`);
+  }
 }
 
 function resetAll() {
@@ -1093,7 +1759,15 @@ function resetAll() {
     bot.chat(`/effect give ${bot.username} instant_health 1 10`);
     setTimeout(() => bot.chat(`/effect clear ${bot.username}`), 500);
   }
-  bots[BOTS_CONFIG[0].name]?.chat("Everyone healed! Ready for another round.");
+  setTimeout(
+    () =>
+      bots[BOTS_CONFIG[0].name]?.chat("Everyone healed! Ready to go again!"),
+    800,
+  );
+  setTimeout(() => {
+    const bc = pick(BOTS_CONFIG.filter((b) => b.role !== "leader"));
+    bots[bc.name]?.chat("I feel so much better!");
+  }, 2000);
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -1101,47 +1775,39 @@ function resetAll() {
 // ═══════════════════════════════════════════════════════════════════════
 
 console.log("==========================================================");
-console.log("       MINEFLAYER TEAM BATTLE MODE (5 Bots)");
+console.log("      MINEFLAYER CO-OP MODE (6 Bots, 1 Team!)");
 console.log("==========================================================");
 console.log("");
-console.log("  \x1b[31mRED TEAM (Beat the Game):\x1b[0m");
-for (const bc of BOTS_CONFIG.filter((b) => b.team === "red")) {
-  console.log(`    ${bc.color}${bc.name}\x1b[0m - ${bc.role}`);
-}
-console.log("");
-console.log("  \x1b[34mBLUE TEAM (Stop Red Team):\x1b[0m");
-for (const bc of BOTS_CONFIG.filter((b) => b.team === "blue")) {
+console.log("  THE SQUAD:");
+for (const bc of BOTS_CONFIG) {
   console.log(`    ${bc.color}${bc.name}\x1b[0m - ${bc.role}`);
 }
 console.log("");
 console.log(`  Server: ${HOST}:${PORT} (v${VERSION})`);
 console.log("==========================================================");
 console.log("  In-game commands:");
-console.log('    "fight"    - Blue team starts hunting Red');
-console.log('    "beat"     - Red team starts game progression');
-console.log('    "stop"     - Everyone stops');
-console.log('    "score"    - Show scoreboard');
-console.log('    "reset"    - Heal all bots');
-console.log('    "arm"      - Random gear for all');
-console.log('    "arm red"  - Random gear for Red team');
-console.log('    "arm blue" - Random gear for Blue team');
-console.log('    "kit iron" - Specific gear kit for all');
-console.log('    "quit"     - Disconnect all bots');
+console.log('    "go" / "beat" - Start the adventure!');
+console.log('    "stop"        - Everyone stops');
+console.log('    "regroup"     - Everyone comes to you');
+console.log('    "status"      - Show squad status');
+console.log('    "reset"       - Heal all bots');
+console.log('    "arm"         - Random gear for all');
+console.log('    "kit iron"    - Specific gear for all');
+console.log('    "quit"        - Disconnect all bots');
 console.log("==========================================================");
 console.log("");
-console.log("  (All bots are a little dumb. Expect chaos.)");
+console.log("  (All bots are a little dumb and talk A LOT. Enjoy!)");
 console.log("");
 
-// Stagger bot joins to avoid server overload
+// Stagger joins
 let delay = 0;
 for (const bc of BOTS_CONFIG) {
   setTimeout(() => spawnBot(bc), delay);
   delay += 2500;
 }
 
-// Graceful shutdown
 process.on("SIGINT", () => {
-  console.log("\n[Battle] Shutting down...");
+  console.log("\n[Co-op] Shutting down...");
   for (const bot of Object.values(bots)) {
     try {
       bot.quit();
