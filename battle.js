@@ -121,7 +121,7 @@ function scheduleRejoin(botConfig) {
 
 // ── Dumb Bot Config ─────────────────────────────────────────────────────
 
-const DUMB_CHANCE = 0.1;
+const DUMB_CHANCE = 0.04;
 
 const DUMB_THINGS = [
   (bot) => {
@@ -1512,6 +1512,7 @@ function spawnBot(botConfig) {
     host: HOST,
     port: PORT,
     version: VERSION,
+    checkTimeoutInterval: 120_000, // 2 min keepalive (default 30s is too short for LAN)
   });
 
   bot.loadPlugin(pathfinder);
@@ -1611,19 +1612,18 @@ function spawnBot(botConfig) {
   // Track who killed whom
   bot.on("death", () => {
     console.log(`${color}[DEATH] ${name} died!\x1b[0m`);
-    bot.chat(
-      pick([
-        "Ow...",
-        "I'll be back!",
-        "Not like this...",
-        "Respawning!",
-        "x_x",
-        "I blame lag!",
-        "That was unfair!",
-        "Nooooo!",
-        "gg",
-      ]),
-    );
+    if (Math.random() < 0.5) {
+      bot.chat(
+        pick([
+          "Ow...",
+          "I'll be back!",
+          "Not like this...",
+          "Respawning!",
+          "x_x",
+          "gg",
+        ]),
+      );
+    }
 
     // Try to figure out who killed us
     let killer = null;
@@ -1669,7 +1669,7 @@ function spawnBot(botConfig) {
   // Hurt reactions — react differently based on attacker team
   bot.on("entityHurt", (entity) => {
     if (entity !== bot.entity) return;
-    if (Math.random() < 0.3) {
+    if (Math.random() < 0.08) {
       bot.chat(
         pick(["Ow!", "Hey!", "Ouch!", "I'm hit!", "Help!", "*screams*"]),
       );
