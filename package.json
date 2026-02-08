@@ -6,7 +6,8 @@
   "scripts": {
     "start": "node index.js",
     "dev": "node --watch index.js",
-    "battle": "node battle.js"
+    "battle": "node battle.js",
+    "build": "node build-challenge.js"
   },
   "keywords": [
     "mineflayer",
