@@ -120,61 +120,68 @@ const CHAT = {
 };
 
 // ═══════════════════════════════════════════════════════════════════════
-//  EPIC HOUSE BLUEPRINT
+//  LARGE HOUSE BLUEPRINT — 50×50
 // ═══════════════════════════════════════════════════════════════════════
 
 function generateEpicHouse() {
   const blocks = [];
-  const W = 13,
-    D = 13,
-    H = 6;
+  const W = 50,
+    D = 50,
+    H = 8;
+  const midX = Math.floor(W / 2);
+  const midZ = Math.floor(D / 2);
 
-  // ── Foundation (stone_bricks) ──────────────────────────────────────
+  // ── Foundation (stone_bricks) ─────────────────────────────────────
   for (let x = -1; x <= W; x++)
     for (let z = -1; z <= D; z++)
       blocks.push({ offset: [x, -1, z], block: "stone_bricks" });
 
-  // ── Floor (oak_planks interior, stone_bricks border) ──────────────
+  // ── Floor (checker pattern) ───────────────────────────────────────
   for (let x = 0; x < W; x++)
     for (let z = 0; z < D; z++) {
       const border = x === 0 || x === W - 1 || z === 0 || z === D - 1;
+      const checker = (x + z) % 2 === 0 ? "oak_planks" : "spruce_planks";
       blocks.push({
         offset: [x, 0, z],
-        block: border ? "smooth_stone" : "oak_planks",
+        block: border ? "smooth_stone" : checker,
       });
     }
 
-  // ── Corner pillars (oak_log, full height + 1) ─────────────────────
+  // ── Corner pillars (oak_log, full height) ─────────────────────────
   for (const cx of [0, W - 1])
     for (const cz of [0, D - 1])
       for (let y = 1; y <= H + 1; y++)
         blocks.push({ offset: [cx, y, cz], block: "oak_log" });
 
-  // ── Mid pillars on long walls ─────────────────────────────────────
-  const midX = Math.floor(W / 2);
-  const midZ = Math.floor(D / 2);
-  for (const cz of [0, D - 1])
-    for (let y = 1; y <= H; y++)
-      blocks.push({ offset: [midX, y, cz], block: "stripped_oak_log" });
-  for (const cx of [0, W - 1])
-    for (let y = 1; y <= H; y++)
-      blocks.push({ offset: [cx, y, midZ], block: "stripped_oak_log" });
+  // ── Interval pillars every 10 blocks along walls ──────────────────
+  for (let x = 10; x < W; x += 10) {
+    for (const cz of [0, D - 1])
+      for (let y = 1; y <= H; y++)
+        blocks.push({ offset: [x, y, cz], block: "stripped_oak_log" });
+  }
+  for (let z = 10; z < D; z += 10) {
+    for (const cx of [0, W - 1])
+      for (let y = 1; y <= H; y++)
+        blocks.push({ offset: [cx, y, z], block: "stripped_oak_log" });
+  }
 
   // ── Walls ─────────────────────────────────────────────────────────
   const doorX = midX;
+  function isWindowPos(pos, wallLen) {
+    // Windows every 5 blocks, 2-wide
+    return (pos % 5 === 2 || pos % 5 === 3) && pos > 1 && pos < wallLen - 2;
+  }
+
   for (let y = 1; y <= H; y++) {
-    const mat = y <= 2 ? "stone_bricks" : "oak_planks";
+    const mat = y <= 3 ? "stone_bricks" : "oak_planks";
+    const isWindowY = y === 4 || y === 5;
 
     // Front wall (z = 0)
     for (let x = 1; x < W - 1; x++) {
-      if (x === midX) continue; // mid pillar already placed
-      if (x === doorX && y <= 2) continue; // door opening
-      if (x === doorX - 1 && y <= 2) continue; // wider door
-      if (y === 3 && (x === 3 || x === W - 4)) {
-        blocks.push({ offset: [x, y, 0], block: "glass_pane" });
-        continue;
-      }
-      if (y === 4 && (x === 3 || x === W - 4)) {
+      if (x % 10 === 0) continue; // pillar already placed
+      if ((x === doorX || x === doorX - 1 || x === doorX + 1) && y <= 3)
+        continue; // 3-wide door
+      if (isWindowY && isWindowPos(x, W)) {
         blocks.push({ offset: [x, y, 0], block: "glass_pane" });
         continue;
       }
@@ -183,12 +190,10 @@ function generateEpicHouse() {
 
     // Back wall (z = D-1)
     for (let x = 1; x < W - 1; x++) {
-      if (x === midX) continue;
-      if (y === 3 && (x === 3 || x === W - 4)) {
-        blocks.push({ offset: [x, y, D - 1], block: "glass_pane" });
-        continue;
-      }
-      if (y === 4 && (x === 3 || x === W - 4)) {
+      if (x % 10 === 0) continue;
+      if ((x === doorX || x === doorX - 1 || x === doorX + 1) && y <= 3)
+        continue; // back door too
+      if (isWindowY && isWindowPos(x, W)) {
         blocks.push({ offset: [x, y, D - 1], block: "glass_pane" });
         continue;
       }
@@ -197,12 +202,8 @@ function generateEpicHouse() {
 
     // Left wall (x = 0)
     for (let z = 1; z < D - 1; z++) {
-      if (z === midZ) continue;
-      if (y === 3 && (z === 3 || z === D - 4)) {
-        blocks.push({ offset: [0, y, z], block: "glass_pane" });
-        continue;
-      }
-      if (y === 4 && (z === 3 || z === D - 4)) {
+      if (z % 10 === 0) continue;
+      if (isWindowY && isWindowPos(z, D)) {
         blocks.push({ offset: [0, y, z], block: "glass_pane" });
         continue;
       }
@@ -211,12 +212,8 @@ function generateEpicHouse() {
 
     // Right wall (x = W-1)
     for (let z = 1; z < D - 1; z++) {
-      if (z === midZ) continue;
-      if (y === 3 && (z === 3 || z === D - 4)) {
-        blocks.push({ offset: [W - 1, y, z], block: "glass_pane" });
-        continue;
-      }
-      if (y === 4 && (z === 3 || z === D - 4)) {
+      if (z % 10 === 0) continue;
+      if (isWindowY && isWindowPos(z, D)) {
         blocks.push({ offset: [W - 1, y, z], block: "glass_pane" });
         continue;
       }
@@ -224,109 +221,150 @@ function generateEpicHouse() {
     }
   }
 
-  // ── Peaked Roof ───────────────────────────────────────────────────
-  for (let layer = 0; layer <= Math.floor(W / 2); layer++) {
+  // ── Flat Roof with border ─────────────────────────────────────────
+  // A peaked roof on 50-wide would be 25 layers tall, way too much—use flat roof
+  for (let x = -1; x <= W; x++)
     for (let z = -1; z <= D; z++) {
-      if (layer < Math.floor(W / 2)) {
-        blocks.push({ offset: [layer, H + 1 + layer, z], block: "oak_stairs" });
-        blocks.push({
-          offset: [W - 1 - layer, H + 1 + layer, z],
-          block: "oak_stairs",
-        });
-      } else {
-        // Ridge cap
-        blocks.push({ offset: [layer, H + 1 + layer, z], block: "oak_log" });
-      }
+      const edge = x === -1 || x === W || z === -1 || z === D;
+      blocks.push({
+        offset: [x, H + 1, z],
+        block: edge ? "stone_brick_stairs" : "dark_oak_planks",
+      });
     }
+  // Roof border lip
+  for (let x = -1; x <= W; x++) {
+    blocks.push({ offset: [x, H + 2, -1], block: "oak_fence" });
+    blocks.push({ offset: [x, H + 2, D], block: "oak_fence" });
+  }
+  for (let z = 0; z < D; z++) {
+    blocks.push({ offset: [-1, H + 2, z], block: "oak_fence" });
+    blocks.push({ offset: [W, H + 2, z], block: "oak_fence" });
   }
 
-  // ── Gable ends (front & back triangles) ───────────────────────────
-  for (let layer = 1; layer <= Math.floor(W / 2) - 1; layer++) {
-    for (let x = layer; x < W - layer; x++) {
-      blocks.push({ offset: [x, H + 1 + layer, 0], block: "oak_planks" });
-      blocks.push({ offset: [x, H + 1 + layer, D - 1], block: "oak_planks" });
+  // ── Interior Walls — split into 4 quadrants ──────────────────────
+  // Horizontal divider (z = midZ)
+  for (let x = 1; x < W - 1; x++) {
+    for (let y = 1; y <= H - 1; y++) {
+      // 3-wide doorways at 1/4 and 3/4
+      const q1 = Math.floor(W / 4);
+      const q3 = Math.floor((3 * W) / 4);
+      if ((x >= q1 - 1 && x <= q1 + 1) || (x >= q3 - 1 && x <= q3 + 1))
+        continue;
+      blocks.push({ offset: [x, y, midZ], block: "oak_planks" });
+    }
+  }
+  // Vertical divider (x = midX)
+  for (let z = 1; z < D - 1; z++) {
+    if (z === midZ) continue; // cross intersection
+    for (let y = 1; y <= H - 1; y++) {
+      const q1 = Math.floor(D / 4);
+      const q3 = Math.floor((3 * D) / 4);
+      if ((z >= q1 - 1 && z <= q1 + 1) || (z >= q3 - 1 && z <= q3 + 1))
+        continue;
+      blocks.push({ offset: [midX, y, z], block: "oak_planks" });
     }
   }
 
   // ── Front Porch ───────────────────────────────────────────────────
-  for (let x = doorX - 3; x <= doorX + 2; x++) {
-    blocks.push({ offset: [x, 0, -1], block: "oak_planks" });
-    blocks.push({ offset: [x, 0, -2], block: "oak_planks" });
-    blocks.push({ offset: [x, 0, -3], block: "oak_planks" });
+  for (let x = doorX - 5; x <= doorX + 5; x++) {
+    for (let dz = -1; dz >= -4; dz--)
+      blocks.push({ offset: [x, 0, dz], block: "oak_planks" });
   }
   // Porch pillars
-  for (const px of [doorX - 3, doorX + 2]) {
-    blocks.push({ offset: [px, 1, -3], block: "oak_fence" });
-    blocks.push({ offset: [px, 2, -3], block: "oak_fence" });
-    blocks.push({ offset: [px, 3, -3], block: "lantern" });
+  for (const px of [doorX - 5, doorX + 5]) {
+    for (let y = 1; y <= 3; y++)
+      blocks.push({ offset: [px, y, -4], block: "oak_log" });
+    blocks.push({ offset: [px, 4, -4], block: "lantern" });
   }
   // Porch roof
-  for (let x = doorX - 3; x <= doorX + 2; x++) {
-    blocks.push({ offset: [x, 3, -1], block: "oak_slab" });
-    blocks.push({ offset: [x, 3, -2], block: "oak_slab" });
-    blocks.push({ offset: [x, 3, -3], block: "oak_slab" });
+  for (let x = doorX - 5; x <= doorX + 5; x++) {
+    for (let dz = -1; dz >= -4; dz--)
+      blocks.push({ offset: [x, 4, dz], block: "oak_slab" });
   }
   // Porch railing
-  for (let x = doorX - 2; x <= doorX + 1; x++) {
-    blocks.push({ offset: [x, 1, -3], block: "oak_fence" });
-  }
+  for (let x = doorX - 4; x <= doorX + 4; x++)
+    blocks.push({ offset: [x, 1, -4], block: "oak_fence" });
 
-  // ── Interior Walls (divide into 2 rooms) ──────────────────────────
-  const divZ = Math.floor(D / 2);
-  for (let x = 1; x < W - 1; x++) {
-    for (let y = 1; y <= H - 1; y++) {
-      // Leave a 2-wide doorway in the middle
-      if (x === midX || x === midX - 1) continue;
-      blocks.push({ offset: [x, y, divZ], block: "oak_planks" });
-    }
-  }
-
-  // ── Interior — Front Room (living area) ───────────────────────────
-  blocks.push({ offset: [1, 1, 1], block: "crafting_table" });
-  blocks.push({ offset: [2, 1, 1], block: "furnace" });
-  blocks.push({ offset: [3, 1, 1], block: "furnace" });
-  blocks.push({ offset: [W - 2, 1, 1], block: "chest" });
-  blocks.push({ offset: [W - 3, 1, 1], block: "chest" });
-  blocks.push({ offset: [W - 4, 1, 1], block: "chest" });
-  // Bookshelves along side wall
-  for (let z = 2; z < divZ - 1; z++) {
+  // ── Room 1 (front-left): Living Room ──────────────────────────────
+  blocks.push({ offset: [2, 1, 2], block: "crafting_table" });
+  blocks.push({ offset: [3, 1, 2], block: "crafting_table" });
+  blocks.push({ offset: [2, 1, 3], block: "furnace" });
+  blocks.push({ offset: [3, 1, 3], block: "furnace" });
+  // Bookshelves along wall
+  for (let z = 2; z < midZ - 1; z += 2) {
     blocks.push({ offset: [1, 1, z], block: "bookshelf" });
     blocks.push({ offset: [1, 2, z], block: "bookshelf" });
   }
-  // Carpet in the center
-  for (let x = 3; x < W - 3; x++)
-    for (let z = 2; z < divZ - 1; z++)
+  // Carpet runner
+  for (let x = 4; x < midX - 2; x++)
+    for (let z = 3; z < midZ - 2; z += 2)
       blocks.push({ offset: [x, 1, z], block: "carpet" });
+  // Lanterns
+  for (let x = 5; x < midX; x += 8)
+    for (let z = 4; z < midZ; z += 8)
+      blocks.push({ offset: [x, 1, z], block: "lantern" });
 
-  // Lighting — lanterns
-  blocks.push({ offset: [midX, 1, 2], block: "lantern" });
-  blocks.push({ offset: [midX, 1, divZ - 2], block: "lantern" });
+  // ── Room 2 (front-right): Kitchen / Storage ───────────────────────
+  for (let x = midX + 2; x < midX + 8; x++)
+    blocks.push({ offset: [x, 1, 1], block: "furnace" });
+  for (let x = midX + 2; x < midX + 10; x++)
+    blocks.push({ offset: [x, 1, 2], block: "chest" });
+  for (let x = midX + 2; x < midX + 10; x++)
+    blocks.push({ offset: [x, 1, 3], block: "chest" });
+  // Lanterns
+  for (let x = midX + 5; x < W - 2; x += 8)
+    for (let z = 4; z < midZ; z += 8)
+      blocks.push({ offset: [x, 1, z], block: "lantern" });
 
-  // ── Interior — Back Room (bedroom) ────────────────────────────────
-  blocks.push({ offset: [W - 2, 1, D - 2], block: "red_bed" });
-  blocks.push({ offset: [W - 3, 1, D - 2], block: "red_bed" });
-  blocks.push({ offset: [1, 1, D - 2], block: "chest" });
-  blocks.push({ offset: [2, 1, D - 2], block: "chest" });
-  // Carpet bedroom
-  for (let x = 3; x < W - 3; x++)
-    for (let z = divZ + 1; z < D - 2; z++)
+  // ── Room 3 (back-left): Bedroom ──────────────────────────────────
+  for (let x = 2; x < 12; x += 3) {
+    blocks.push({ offset: [x, 1, midZ + 3], block: "red_bed" });
+    blocks.push({ offset: [x + 1, 1, midZ + 3], block: "red_bed" });
+  }
+  for (let x = 2; x < 12; x += 3) {
+    blocks.push({ offset: [x, 1, midZ + 6], block: "red_bed" });
+    blocks.push({ offset: [x + 1, 1, midZ + 6], block: "red_bed" });
+  }
+  // Carpet
+  for (let x = 2; x < midX - 2; x++)
+    for (let z = midZ + 2; z < D - 3; z += 2)
       blocks.push({ offset: [x, 1, z], block: "carpet" });
+  // Lanterns
+  for (let x = 5; x < midX; x += 8)
+    for (let z = midZ + 4; z < D - 2; z += 8)
+      blocks.push({ offset: [x, 1, z], block: "lantern" });
 
-  // Lighting
-  blocks.push({ offset: [midX, 1, divZ + 2], block: "lantern" });
-  blocks.push({ offset: [midX, 1, D - 3], block: "lantern" });
+  // ── Room 4 (back-right): Library / Study ──────────────────────────
+  for (let z = midZ + 2; z < D - 2; z++) {
+    blocks.push({ offset: [W - 2, 1, z], block: "bookshelf" });
+    blocks.push({ offset: [W - 2, 2, z], block: "bookshelf" });
+    blocks.push({ offset: [W - 2, 3, z], block: "bookshelf" });
+  }
+  for (let z = midZ + 2; z < D - 2; z++) {
+    blocks.push({ offset: [W - 3, 1, z], block: "bookshelf" });
+    blocks.push({ offset: [W - 3, 2, z], block: "bookshelf" });
+  }
+  blocks.push({ offset: [midX + 3, 1, D - 3], block: "crafting_table" });
+  blocks.push({ offset: [midX + 4, 1, D - 3], block: "chest" });
+  blocks.push({ offset: [midX + 5, 1, D - 3], block: "chest" });
+  // Lanterns
+  for (let x = midX + 5; x < W - 2; x += 8)
+    for (let z = midZ + 4; z < D - 2; z += 8)
+      blocks.push({ offset: [x, 1, z], block: "lantern" });
 
-  // ── Torches on walls (interior) ───────────────────────────────────
-  blocks.push({ offset: [1, 3, midZ - 2], block: "torch" });
-  blocks.push({ offset: [W - 2, 3, midZ - 2], block: "torch" });
-  blocks.push({ offset: [1, 3, midZ + 2], block: "torch" });
-  blocks.push({ offset: [W - 2, 3, midZ + 2], block: "torch" });
-  blocks.push({ offset: [midX, 3, 1], block: "torch" });
-  blocks.push({ offset: [midX, 3, D - 2], block: "torch" });
+  // ── Wall torches (all rooms) ──────────────────────────────────────
+  for (let x = 5; x < W - 2; x += 8) {
+    blocks.push({ offset: [x, 4, 1], block: "torch" });
+    blocks.push({ offset: [x, 4, D - 2], block: "torch" });
+  }
+  for (let z = 5; z < D - 2; z += 8) {
+    blocks.push({ offset: [1, 4, z], block: "torch" });
+    blocks.push({ offset: [W - 2, 4, z], block: "torch" });
+  }
 
-  // ── Flower pots outside ───────────────────────────────────────────
-  blocks.push({ offset: [1, 1, -1], block: "flower_pot" });
-  blocks.push({ offset: [W - 2, 1, -1], block: "flower_pot" });
+  // ── Exterior flower pots ──────────────────────────────────────────
+  for (let x = 3; x < W - 2; x += 6)
+    blocks.push({ offset: [x, 1, -1], block: "flower_pot" });
 
   return blocks;
 }
