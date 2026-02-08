@@ -335,7 +335,16 @@ export function setupChat(bot) {
   bot.on("chat", (username, message) => {
     if (username === bot.username) return;
     const trimmed = message.trim();
-    const [cmd, ...args] = trimmed.toLowerCase().split(/\s+/);
+    const lower = trimmed.toLowerCase();
+
+    // Multi-word commands
+    if (lower === "build epic house") {
+      console.log(`[Chat] ${username} → build epic house`);
+      bot.friendlyBot.buildEpicHouse();
+      return;
+    }
+
+    const [cmd, ...args] = lower.split(/\s+/);
 
     if (COMMANDS[cmd]) {
       console.log(`[Chat] ${username} → ${cmd} ${args.join(" ")}`);
