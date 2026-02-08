@@ -85,7 +85,7 @@ The `beat` command runs through these phases in order:
 ```
 mineflayer-bot/
 ├── index.js                 # Entry point
-├── battle.js                # Co-op mode — 6 bots, 1 team!
+├── battle.js                # Battle mode — 6 bots, Red vs Blue!
 ├── config.js                # Environment config
 ├── .env.example             # Config template
 ├── package.json
@@ -115,47 +115,51 @@ mineflayer-bot/
 - The bot will auto-protect configured players when they join the server.
 - Progression is ambitious — the bot may need help with some phases depending on the world.
 
-## Co-op Mode — 6 Bots, 1 Team!
+## Battle Mode — 6 Bots, Red vs Blue!
 
-Spawn **6 bots** that work together as a squad to beat Minecraft! They talk to each other, fight mobs together, and are all a little dumb.
+Spawn **6 bots** in a Red vs Blue team battle! Red team tries to beat the game while Blue team hunts them down. All bots auto-rejoin if disconnected.
 
 ```bash
 npm run battle
 ```
 
-### The Squad
+### Teams
 
-| Bot             | Role      | Behavior                                           |
-| --------------- | --------- | -------------------------------------------------- |
-| **FriendlyBot** | Leader    | Runs the full game progression (beat Minecraft)    |
-| **RedGuard1**   | Bodyguard | Stays near the leader, fights anything threatening |
-| **RedGuard2**   | Gatherer  | Mines nearby resources, panics when attacked       |
-| **RedScout**    | Scout     | Runs ahead, reports mobs and points of interest    |
-| **BlueHelper1** | Fighter   | Actively hunts hostile mobs around the group       |
-| **BlueHelper2** | Builder   | Follows leader, helps with odd jobs and gathering  |
+| Bot             | Team | Role      | Behavior                                        |
+| --------------- | ---- | --------- | ----------------------------------------------- |
+| **FriendlyBot** | Red  | Leader    | Runs the full game progression (beat Minecraft) |
+| **RedGuard1**   | Red  | Bodyguard | Stays near the leader, fights Blue team & mobs  |
+| **RedGuard2**   | Red  | Gatherer  | Mines nearby resources, runs from Blue team     |
+| **RedScout**    | Red  | Scout     | Runs ahead, reports Blue team positions & mobs  |
+| **BlueHunter1** | Blue | Hunter    | Aggressively chases and attacks Red team        |
+| **BlueHunter2** | Blue | Flanker   | Sneaks around and attacks Red from behind       |
 
 All bots are **a little dumb** — they get distracted by butterflies, walk into walls,
-forget their swords, panic, miss attacks, and say silly things. They also **talk to each other constantly** with banter, reactions, and team callouts. Expect chaos and comedy.
+forget their swords, panic, miss attacks, and say silly things. They also **trash-talk each other across teams** and chat with teammates. Expect chaos and comedy.
 
-### Co-op Commands (say in-game chat)
+Bots **auto-rejoin** if they get kicked or disconnected (with increasing delay between attempts, up to 15s).
 
-| Command         | Description                |
-| --------------- | -------------------------- |
-| `go` / `beat`   | Start the adventure!       |
-| `stop`          | Everyone stops             |
-| `regroup`       | Everyone comes to you      |
-| `status`        | Show squad status & HP     |
-| `reset`         | Heal all bots              |
-| `arm`           | Random gear for all 6 bots |
-| `kit stone`     | Stone gear for all         |
-| `kit iron`      | Iron gear for all          |
-| `kit diamond`   | Diamond gear for all       |
-| `kit netherite` | Netherite gear for all     |
-| `quit`          | Disconnect all bots        |
+### Battle Commands (say in-game chat)
+
+| Command                | Description                     |
+| ---------------------- | ------------------------------- |
+| `beat` / `go`          | Red team starts progression     |
+| `fight`                | Blue team starts hunting Red    |
+| `stop`                 | Everyone stops                  |
+| `status`               | Show battle status & HP         |
+| `score`                | Show kill scoreboard            |
+| `reset`                | Heal all bots                   |
+| `arm`                  | Random gear for all 6 bots      |
+| `arm red` / `arm blue` | Random gear for one team        |
+| `kit stone`            | Stone gear for all              |
+| `kit iron`             | Iron gear for all               |
+| `kit diamond`          | Diamond gear for all            |
+| `kit netherite`        | Netherite gear for all          |
+| `quit`                 | Disconnect all bots (no rejoin) |
 
 > **Note:** Gear commands use `/give` and `/clear`, so your server needs cheats enabled (LAN world with cheats ON, or an operator in a server).
 >
-> **Tip:** The bots have over 50 scripted conversations and react to deaths, respawns, combat, and each other's actions!
+> **Tip:** Say `fight` and `beat` together for the full experience — Red tries to progress while Blue hunts them!
 
 ## Dependencies
 
