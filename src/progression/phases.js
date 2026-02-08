@@ -3,12 +3,13 @@
  *
  * Phases:
  *  1. start        → Gather wood, make tools
- *  2. iron         → Mine stone & iron, craft iron gear
- *  3. diamond      → Mine diamonds, craft diamond gear
- *  4. nether_prep  → Get obsidian, flint & steel, gold, food, bow
- *  5. nether       → Enter Nether, blaze rods, barter ender pearls
- *  6. stronghold   → Craft eyes of ender, locate stronghold
- *  7. end          → Enter End, fight dragon
+ *  2. base          → Build a house for safety
+ *  3. iron         → Mine stone & iron, craft iron gear
+ *  4. diamond      → Mine diamonds, craft diamond gear
+ *  5. nether_prep  → Get obsidian, flint & steel, gold, food, bow
+ *  6. nether       → Enter Nether, blaze rods, barter ender pearls
+ *  7. stronghold   → Craft eyes of ender, locate stronghold
+ *  8. end          → Enter End, fight dragon
  */
 
 import mcDataLoader from "minecraft-data";
@@ -66,7 +67,31 @@ const PHASES = [
     },
   },
 
-  // ── Phase 2: Stone & Iron ────────────────────────────────────────
+  // ── Phase 2: Build a Base ────────────────────────────────────────
+  {
+    name: "base",
+    label: "Build a house for safety",
+    async execute(bot) {
+      const fb = bot.friendlyBot;
+      bot.chat("Time to build a home base!");
+
+      // Craft torches for the house
+      if (!fb.hasItem("torch", 4)) {
+        if (!fb.hasItem("coal", 2)) {
+          await fb.mineBlock("coal_ore", 2).catch(() => {});
+        }
+        if (fb.hasItem("coal") && fb.hasItem("stick")) {
+          await fb.craftItem("torch", 4).catch(() => {});
+        }
+      }
+
+      // Build the house
+      const built = await fb.buildHouse();
+      return built;
+    },
+  },
+
+  // ── Phase 3: Stone & Iron ────────────────────────────────────────
   {
     name: "iron",
     label: "Get stone tools and mine iron",

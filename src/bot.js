@@ -24,6 +24,7 @@ import { setupCrafting } from "./plugins/crafting.js";
 import { setupInventory } from "./plugins/inventory.js";
 import { setupNether } from "./plugins/nether.js";
 import { setupEnd } from "./plugins/end.js";
+import { setupBuilding } from "./plugins/building.js";
 import { setupPersonality } from "./plugins/personality.js";
 import { setupAutonomous } from "./plugins/autonomous.js";
 import { setupProgression } from "./progression/index.js";
@@ -69,6 +70,7 @@ export function createBot(config) {
     setupInventory(bot);
     setupNether(bot);
     setupEnd(bot);
+    setupBuilding(bot);
     setupPersonality(bot);
     setupAutonomous(bot);
     setupProgression(bot);
