@@ -7,6 +7,7 @@ export default {
     port: parseInt(process.env.BOT_PORT, 10) || 25565,
     version: process.env.BOT_VERSION || "1.20.4",
     auth: process.env.BOT_AUTH || undefined,
+    checkTimeoutInterval: 300_000, // 5 min keepalive — prevents ECONNABORTED on slow LAN
   },
   protection: {
     players: process.env.PROTECTED_PLAYERS

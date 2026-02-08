@@ -8,6 +8,19 @@ import Vec3 from "vec3";
 export function setupBuilding(bot) {
   const mcData = mcDataLoader(bot.version);
 
+  /** Track connection state — abort building if disconnected */
+  let connected = true;
+  bot.on("end", () => {
+    connected = false;
+  });
+  bot.once("spawn", () => {
+    connected = true;
+  });
+
+  function assertConnected() {
+    if (!connected) throw new Error("Bot disconnected — aborting build");
+  }
+
   /** Check if the bot is in creative mode */
   function isCreative() {
     return bot.game?.gameMode === "creative" || bot.game?.gameMode === 1;
@@ -328,6 +341,7 @@ export function setupBuilding(bot) {
 
   /** Place a block at a specific position. */
   async function placeBlockAt(targetPos, blockName) {
+    assertConnected();
     const item = bot.inventory.items().find((i) => i.name === blockName);
     if (!item) return false;
 
@@ -371,6 +385,7 @@ export function setupBuilding(bot) {
 
   /** Place a specific item (furniture) at a position. */
   async function placeItemAt(targetPos, itemName) {
+    assertConnected();
     const item = bot.inventory.items().find((i) => i.name === itemName);
     if (!item) return false;
 

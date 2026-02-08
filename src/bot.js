@@ -101,9 +101,10 @@ export function createBot(config) {
     }
   });
 
-  bot.on("kicked", (reason) => console.log(`[FriendlyBot] Kicked: ${reason}`));
-  bot.on("error", (err) => console.error("[FriendlyBot] Error:", err.message));
-  bot.on("end", () => console.log("[FriendlyBot] Disconnected."));
+  bot.on("kicked", (reason) => {
+    console.log(`[FriendlyBot] Kicked: ${reason}`);
+    bot.friendlyBot.busy = false;
+  });
 
   return bot;
 }
