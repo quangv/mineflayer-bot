@@ -121,7 +121,25 @@ function scheduleRejoin(botConfig) {
 
 // ── Dumb Bot Config ─────────────────────────────────────────────────────
 
-const DUMB_CHANCE = 0.04;
+const DUMB_CHANCE = 0.02;
+
+// ── Pathfinder throttle ─────────────────────────────────────────────────
+// Only allow N bots to pathfind at the same time to reduce server load
+const MAX_CONCURRENT_PATHFIND = 2;
+let activePathfinders = 0;
+
+function throttledGoal(bot, goal, dynamic = true) {
+  if (activePathfinders >= MAX_CONCURRENT_PATHFIND) return false;
+  activePathfinders++;
+  try {
+    bot.pathfinder.setGoal(goal, dynamic);
+  } catch {}
+  // Release slot after a delay (path calc takes ~2-5s)
+  setTimeout(() => {
+    activePathfinders = Math.max(0, activePathfinders - 1);
+  }, 5000);
+  return true;
+}
 
 const DUMB_THINGS = [
   (bot) => {
@@ -767,10 +785,13 @@ function setupLeaderAI(bot) {
     start() {
       bot.chat("Alright Red team, let's beat the game! Watch out for Blue!");
       if (bot.friendlyBot?.startProgression) bot.friendlyBot.startProgression();
-      aiInterval = setInterval(() => this.tick(), 8000 + Math.random() * 5000);
+      aiInterval = setInterval(
+        () => this.tick(),
+        20000 + Math.random() * 15000,
+      );
       convoInterval = setInterval(
         () => triggerConversation(),
-        20000 + Math.random() * 15000,
+        45000 + Math.random() * 30000,
       );
     },
 
@@ -780,14 +801,8 @@ function setupLeaderAI(bot) {
       // Check for Blue team enemies
       const { entity: enemy, distance: enemyDist } = findNearestEnemy(bot, 16);
       if (enemy) {
-        bot.chat(
-          pick([
-            "Blue team spotted! Help me!",
-            "They found us! Fight back!",
-            "BLUE INCOMING! Protect me!",
-            "Everyone defend! Blue team is here!",
-          ]),
-        );
+        if (Math.random() < 0.3)
+          bot.chat(pick(["Blue spotted!", "BLUE INCOMING!", "Defend!"]));
         await delayedAction(200, 800);
         try {
           const sword = bot.inventory
@@ -802,7 +817,6 @@ function setupLeaderAI(bot) {
       // Fight hostile mobs if close
       const { entity: hostile } = findNearestHostile(bot, 6);
       if (hostile) {
-        bot.chat("Mob near me!");
         await delayedAction(200, 600);
         try {
           const sword = bot.inventory
@@ -846,29 +860,23 @@ function setupBodyguardAI(bot) {
   bot._battleAI = {
     start() {
       bot.chat("Nobody touches FriendlyBot! Especially not Blue team!");
-      aiInterval = setInterval(() => this.tick(), 6000 + Math.random() * 4000);
+      aiInterval = setInterval(
+        () => this.tick(),
+        20000 + Math.random() * 10000,
+      );
     },
 
     async tick() {
       if (maybeDoDumbThing(bot)) return;
+      // Skip half the ticks to reduce server load
+      if (Math.random() < 0.5) return;
 
       // Priority 1: Kill Blue team near the leader
       const { entity: enemy, distance: enemyDist } = findNearestEnemy(bot, 20);
       if (enemy) {
         await delayedAction(200, 700);
-        if (Math.random() < 0.1) {
-          bot.chat("Wait where'd they go??");
-          return;
-        }
-        bot.chat(
-          pick([
-            `Get away from my boss, ${enemy._playerName || "Blue"}!`,
-            `Blue team! You're DEAD!`,
-            `PROTECTING THE LEADER!`,
-            `I don't think so, Blue!`,
-            `CHARGE!!`,
-          ]),
-        );
+        if (Math.random() < 0.2)
+          bot.chat(pick([`Blue team! CHARGE!!`, `PROTECTING THE LEADER!`]));
         try {
           const sword = bot.inventory
             .items()
@@ -880,16 +888,9 @@ function setupBodyguardAI(bot) {
       }
 
       // Priority 2: Kill hostile mobs
-      const { entity: hostile } = findNearestHostile(bot, 14);
+      const { entity: hostile } = findNearestHostile(bot, 10);
       if (hostile) {
         await delayedAction(200, 800);
-        bot.chat(
-          pick([
-            `Mob incoming!`,
-            `${hostile.name}! I got it!`,
-            `Hostile spotted!`,
-          ]),
-        );
         try {
           const sword = bot.inventory
             .items()
@@ -905,20 +906,7 @@ function setupBodyguardAI(bot) {
       if (leader) {
         const dist = leader.position.distanceTo(bot.entity.position);
         if (dist > 10) {
-          if (Math.random() < 0.15) {
-            bot.chat("Coming boss!");
-            const wrong = bot.entity.position.offset(
-              (Math.random() - 0.5) * 8,
-              0,
-              (Math.random() - 0.5) * 8,
-            );
-            bot.pathfinder.setGoal(
-              new goals.GoalNear(wrong.x, wrong.y, wrong.z, 2),
-              true,
-            );
-            await new Promise((r) => setTimeout(r, 1500));
-          }
-          bot.pathfinder.setGoal(new goals.GoalFollow(leader, 4), true);
+          throttledGoal(bot, new goals.GoalFollow(leader, 4));
         } else if (Math.random() < 0.02) {
           bot.chat(
             pick([
@@ -930,18 +918,12 @@ function setupBodyguardAI(bot) {
           );
         }
       } else {
-        if (Math.random() < 0.3) bot.chat("FriendlyBot?? Where are you??");
         const wander = bot.entity.position.offset(
-          (Math.random() - 0.5) * 16,
+          (Math.random() - 0.5) * 10,
           0,
-          (Math.random() - 0.5) * 16,
+          (Math.random() - 0.5) * 10,
         );
-        try {
-          bot.pathfinder.setGoal(
-            new goals.GoalNear(wander.x, wander.y, wander.z, 2),
-            true,
-          );
-        } catch {}
+        throttledGoal(bot, new goals.GoalNear(wander.x, wander.y, wander.z, 2));
       }
     },
 
@@ -969,40 +951,29 @@ function setupGathererAI(bot) {
   bot._battleAI = {
     start() {
       bot.chat("Gathering resources! ...and hiding from Blue team!");
-      aiInterval = setInterval(() => this.tick(), 8000 + Math.random() * 6000);
+      aiInterval = setInterval(
+        () => this.tick(),
+        25000 + Math.random() * 15000,
+      );
     },
 
     async tick() {
       if (maybeDoDumbThing(bot)) return;
+      if (Math.random() < 0.5) return;
 
       // Priority 1: RUN from Blue team!
-      const { entity: enemy, distance: enemyDist } = findNearestEnemy(bot, 20);
+      const { entity: enemy, distance: enemyDist } = findNearestEnemy(bot, 16);
       if (enemy) {
         await delayedAction(300, 1000);
         if (Math.random() < 0.5) {
-          bot.chat(
-            pick([
-              "BLUE TEAM!! HELP ME!!",
-              "AHHH THEY FOUND ME!!",
-              `${enemy._playerName || "Blue"} IS CHASING ME!!`,
-              "RUN RUN RUN!!",
-              "I'M JUST A GATHERER LEAVE ME ALONE!!",
-              "SOMEBODY SAVE ME!!",
-            ]),
-          );
+          if (Math.random() < 0.3) bot.chat(pick(["BLUE! HELP!", "RUN!"]));
           // Run AWAY from enemy
           const dx = bot.entity.position.x - enemy.position.x;
           const dz = bot.entity.position.z - enemy.position.z;
           const away = bot.entity.position.offset(dx * 2, 0, dz * 2);
-          try {
-            bot.pathfinder.setGoal(
-              new goals.GoalNear(away.x, away.y, away.z, 2),
-              true,
-            );
-          } catch {}
+          throttledGoal(bot, new goals.GoalNear(away.x, away.y, away.z, 2));
         } else {
           // Fight back reluctantly
-          bot.chat("Fine I'll fight!! *swings wildly*");
           try {
             const sword = bot.inventory
               .items()
@@ -1015,10 +986,9 @@ function setupGathererAI(bot) {
       }
 
       // Priority 2: Fight hostile mobs
-      const { entity: hostile } = findNearestHostile(bot, 8);
+      const { entity: hostile } = findNearestHostile(bot, 6);
       if (hostile) {
         await delayedAction(400, 1200);
-        bot.chat(pick(["AHHH!", "Not a mob too!", "Leave me alone!"]));
         try {
           const sword = bot.inventory
             .items()
@@ -1034,41 +1004,43 @@ function setupGathererAI(bot) {
       if (leader) {
         const leaderDist = leader.position.distanceTo(bot.entity.position);
         if (leaderDist > 25) {
-          bot.chat("Wait up Red team!");
-          try {
-            bot.pathfinder.setGoal(new goals.GoalFollow(leader, 6), true);
-          } catch {}
+          throttledGoal(bot, new goals.GoalFollow(leader, 6));
           return;
         }
       }
 
       // Mine stuff
-      if (Math.random() < 0.6) {
+      if (Math.random() < 0.4) {
         try {
           const mcData = (await import("minecraft-data")).default(bot.version);
           const blockName = pick(GATHER_BLOCKS);
           const block = bot.findBlock({
             matching: mcData.blocksByName[blockName]?.id,
-            maxDistance: 16,
+            maxDistance: 10,
           });
           if (block) {
-            bot.chat(
-              pick([
-                `Found ${blockName}!`,
-                `Grabbing some ${blockName}!`,
-                `${blockName}! Dibs!`,
-              ]),
-            );
-            await bot.pathfinder.goto(
-              new goals.GoalNear(
-                block.position.x,
-                block.position.y,
-                block.position.z,
-                1,
-              ),
-            );
-            await bot.dig(block);
-            if (Math.random() < 0.3) bot.chat("Got it!");
+            if (
+              throttledGoal(
+                bot,
+                new goals.GoalNear(
+                  block.position.x,
+                  block.position.y,
+                  block.position.z,
+                  1,
+                ),
+                false,
+              )
+            ) {
+              await bot.pathfinder.goto(
+                new goals.GoalNear(
+                  block.position.x,
+                  block.position.y,
+                  block.position.z,
+                  1,
+                ),
+              );
+              await bot.dig(block);
+            }
           }
         } catch {}
       }
@@ -1090,25 +1062,23 @@ function setupScoutAI(bot) {
   bot._battleAI = {
     start() {
       bot.chat("Scouting ahead! I'll keep an eye out for Blue team!");
-      aiInterval = setInterval(() => this.tick(), 7000 + Math.random() * 5000);
+      aiInterval = setInterval(
+        () => this.tick(),
+        20000 + Math.random() * 15000,
+      );
     },
 
     async tick() {
       if (maybeDoDumbThing(bot)) return;
+      if (Math.random() < 0.5) return;
 
       const leader = findLeaderEntity(bot);
 
       // Priority 1: Report Blue team
-      const { entity: enemy, distance: enemyDist } = findNearestEnemy(bot, 24);
+      const { entity: enemy, distance: enemyDist } = findNearestEnemy(bot, 20);
       if (enemy) {
-        bot.chat(
-          pick([
-            `BLUE TEAM ALERT! ${enemy._playerName || "enemy"} is ${Math.round(enemyDist)} blocks away!`,
-            `I see ${enemy._playerName || "Blue team"}! Everyone heads up!`,
-            `WARNING: Blue team spotted nearby!!`,
-            `${enemy._playerName || "Blue"} incoming! Get ready!`,
-          ]),
-        );
+        if (Math.random() < 0.3)
+          bot.chat(`BLUE ALERT! ${enemy._playerName || "enemy"} nearby!`);
         // Fight if close, retreat if far
         if (enemyDist < 8) {
           await delayedAction(200, 600);
@@ -1120,10 +1090,7 @@ function setupScoutAI(bot) {
             bot.pvp.attack(enemy);
           } catch {}
         } else if (leader) {
-          // Run back to group to warn them
-          try {
-            bot.pathfinder.setGoal(new goals.GoalFollow(leader, 5), true);
-          } catch {}
+          throttledGoal(bot, new goals.GoalFollow(leader, 5));
         }
         return;
       }
@@ -1131,9 +1098,9 @@ function setupScoutAI(bot) {
       // Report hostile mobs
       const { entity: hostile, distance: hostDist } = findNearestHostile(
         bot,
-        20,
+        14,
       );
-      if (hostile && hostDist < 20) {
+      if (hostile && hostDist < 14) {
         bot.chat(
           pick([
             `${hostile.name} spotted ${Math.round(hostDist)} blocks out!`,
@@ -1155,36 +1122,18 @@ function setupScoutAI(bot) {
       // Stay ahead of leader
       if (leader) {
         const dist = leader.position.distanceTo(bot.entity.position);
-        if (dist > 30) {
-          bot.chat("Coming back to the group!");
-          try {
-            bot.pathfinder.setGoal(new goals.GoalFollow(leader, 8), true);
-          } catch {}
+        if (dist > 25) {
+          throttledGoal(bot, new goals.GoalFollow(leader, 8));
         } else if (dist < 8) {
           const ahead = leader.position.offset(
-            (Math.random() - 0.5) * 20 + 10,
+            (Math.random() - 0.5) * 15 + 8,
             0,
-            (Math.random() - 0.5) * 20 + 10,
+            (Math.random() - 0.5) * 15 + 8,
           );
-          if (Math.random() < 0.3) bot.chat("Scouting ahead!");
-          try {
-            bot.pathfinder.setGoal(
-              new goals.GoalNear(ahead.x, ahead.y, ahead.z, 2),
-              true,
-            );
-          } catch {}
+          throttledGoal(bot, new goals.GoalNear(ahead.x, ahead.y, ahead.z, 2));
         }
-        if (Math.random() < 0.06) {
-          bot.chat(
-            pick([
-              "I see a village in the distance!",
-              "Found a cave entrance!",
-              "Clear ahead!",
-              "There's a mountain this way!",
-              "Coast is clear... for now.",
-              "No sign of Blue team!",
-            ]),
-          );
+        if (Math.random() < 0.03) {
+          bot.chat(pick(["Clear ahead.", "No sign of Blue."]));
         }
       }
     },
@@ -1209,35 +1158,23 @@ function setupHunterAI(bot) {
   bot._battleAI = {
     start() {
       bot.chat("Time to hunt some Red bots! Let's GO!");
-      aiInterval = setInterval(() => this.tick(), 5000 + Math.random() * 4000);
+      aiInterval = setInterval(
+        () => this.tick(),
+        15000 + Math.random() * 10000,
+      );
     },
 
     async tick() {
       if (maybeDoDumbThing(bot)) return;
+      if (Math.random() < 0.5) return;
 
       // Priority 1: Hunt Red team
-      const { entity: enemy, distance: enemyDist } = findNearestEnemy(bot, 32);
+      const { entity: enemy, distance: enemyDist } = findNearestEnemy(bot, 24);
       if (enemy) {
         await delayedAction(100, 500);
 
-        // Miss sometimes
-        if (Math.random() < 0.12) {
-          bot.chat(`Take this, ${enemy._playerName || "Red"}! *misses*`);
-          bot.swingArm("hand");
-          await new Promise((r) => setTimeout(r, 400));
-        }
-
-        bot.chat(
-          pick([
-            `${enemy._playerName || "Red"}, you're MINE!`,
-            `Come here ${enemy._playerName || "Red"}!`,
-            `Found you, ${enemy._playerName || "Red"}!`,
-            `HYAAAA! *charges*`,
-            `You can't run forever!`,
-            `Target acquired: ${enemy._playerName || "Red"}!`,
-            `Goodbye, ${enemy._playerName || "Red"}!`,
-          ]),
-        );
+        if (Math.random() < 0.2)
+          bot.chat(pick([`Found ${enemy._playerName || "Red"}!`, "CHARGE!"]));
 
         try {
           const sword = bot.inventory
@@ -1248,10 +1185,14 @@ function setupHunterAI(bot) {
         } catch {}
 
         // Taunt after pursuing
-        if (Math.random() < 0.2) {
+        if (Math.random() < 0.08) {
           setTimeout(
-            () => bot.chat(pick(TRASH_TALK.blue_to_red)),
-            2000 + Math.random() * 2000,
+            () => {
+              try {
+                bot.chat(pick(TRASH_TALK.blue_to_red));
+              } catch {}
+            },
+            3000 + Math.random() * 3000,
           );
         }
         return;
@@ -1260,30 +1201,13 @@ function setupHunterAI(bot) {
       // Priority 2: Look for Red team — go to their last known area
       const leader = findLeaderEntity(bot);
       if (leader) {
-        if (Math.random() < 0.3)
-          bot.chat(
-            pick([
-              "I see the leader!",
-              "Found Red team's base!",
-              "There they are!",
-            ]),
-          );
-        try {
-          bot.pathfinder.setGoal(new goals.GoalFollow(leader, 3), true);
-        } catch {}
+        throttledGoal(bot, new goals.GoalFollow(leader, 3));
         return;
       }
 
       // Priority 3: Kill hostile mobs while searching
-      const { entity: hostile } = findNearestHostile(bot, 10);
+      const { entity: hostile } = findNearestHostile(bot, 6);
       if (hostile) {
-        bot.chat(
-          pick([
-            "Get out of my way, mob!",
-            `Stupid ${hostile.name}!`,
-            "I don't have time for mobs!",
-          ]),
-        );
         try {
           const sword = bot.inventory
             .items()
@@ -1295,41 +1219,22 @@ function setupHunterAI(bot) {
       }
 
       // Wander + search
-      if (Math.random() < 0.1)
-        bot.chat(
-          pick([
-            "Where are they hiding?",
-            "Come out come out...",
-            "Red team can't hide forever!",
-            "Searching...",
-            "I'll find you, Red team!",
-            "They gotta be around here somewhere...",
-          ]),
-        );
-
       // Stay near partner
-      const { entity: partner } = findNearestTeammate(bot, 40);
+      const { entity: partner } = findNearestTeammate(bot, 30);
       if (partner) {
         const partnerDist = partner.position.distanceTo(bot.entity.position);
-        if (partnerDist > 25) {
-          try {
-            bot.pathfinder.setGoal(new goals.GoalFollow(partner, 8), true);
-          } catch {}
+        if (partnerDist > 20) {
+          throttledGoal(bot, new goals.GoalFollow(partner, 8));
           return;
         }
       }
 
       const wander = bot.entity.position.offset(
-        (Math.random() - 0.5) * 30,
+        (Math.random() - 0.5) * 20,
         0,
-        (Math.random() - 0.5) * 30,
+        (Math.random() - 0.5) * 20,
       );
-      try {
-        bot.pathfinder.setGoal(
-          new goals.GoalNear(wander.x, wander.y, wander.z, 2),
-          true,
-        );
-      } catch {}
+      throttledGoal(bot, new goals.GoalNear(wander.x, wander.y, wander.z, 2));
     },
 
     stop() {
@@ -1348,27 +1253,23 @@ function setupFlankerAI(bot) {
   bot._battleAI = {
     start() {
       bot.chat("I'll flank them! They won't see me coming...");
-      aiInterval = setInterval(() => this.tick(), 6000 + Math.random() * 5000);
+      aiInterval = setInterval(
+        () => this.tick(),
+        20000 + Math.random() * 15000,
+      );
     },
 
     async tick() {
       if (maybeDoDumbThing(bot)) return;
+      if (Math.random() < 0.5) return;
 
-      const { entity: enemy, distance: enemyDist } = findNearestEnemy(bot, 28);
+      const { entity: enemy, distance: enemyDist } = findNearestEnemy(bot, 22);
 
       if (enemy) {
         // Sneak up close
         if (enemyDist > 8) {
-          if (Math.random() < 0.3) {
+          if (Math.random() < 0.15) {
             bot.setControlState("sneak", true);
-            bot.chat(
-              pick([
-                "*sneaking up...*",
-                "shh...",
-                "*flanking*",
-                "They don't see me...",
-              ]),
-            );
           }
           // Circle around them
           const angle = Math.atan2(
@@ -1381,12 +1282,10 @@ function setupFlankerAI(bot) {
             0,
             Math.sin(flankAngle) * 5,
           );
-          try {
-            bot.pathfinder.setGoal(
-              new goals.GoalNear(flankPos.x, flankPos.y, flankPos.z, 2),
-              true,
-            );
-          } catch {}
+          throttledGoal(
+            bot,
+            new goals.GoalNear(flankPos.x, flankPos.y, flankPos.z, 2),
+          );
           return;
         }
 
@@ -1394,17 +1293,8 @@ function setupFlankerAI(bot) {
         bot.clearControlStates();
         await delayedAction(100, 400);
 
-        bot.chat(
-          pick([
-            `SURPRISE ${enemy._playerName || "Red"}!`,
-            `Behind you!`,
-            `Didn't see THAT coming, did ya?`,
-            `FLANKED!`,
-            `*stabs from behind*`,
-            `Sneak attack!`,
-            `BOO! *swings sword*`,
-          ]),
-        );
+        if (Math.random() < 0.25)
+          bot.chat(pick([`SURPRISE!`, `Behind you!`, `FLANKED!`]));
 
         try {
           const sword = bot.inventory
@@ -1414,8 +1304,12 @@ function setupFlankerAI(bot) {
           bot.pvp.attack(enemy);
         } catch {}
 
-        if (Math.random() < 0.25) {
-          setTimeout(() => bot.chat(pick(TRASH_TALK.blue_to_red)), 2000);
+        if (Math.random() < 0.1) {
+          setTimeout(() => {
+            try {
+              bot.chat(pick(TRASH_TALK.blue_to_red));
+            } catch {}
+          }, 3000);
         }
         return;
       }
@@ -1423,30 +1317,19 @@ function setupFlankerAI(bot) {
       // No enemies visible — search for them
       const leader = findLeaderEntity(bot);
       if (leader) {
-        // Approach from an angle
         const angle = Math.random() * Math.PI * 2;
         const offset = leader.position.offset(
-          Math.cos(angle) * 15,
+          Math.cos(angle) * 12,
           0,
-          Math.sin(angle) * 15,
+          Math.sin(angle) * 12,
         );
-        if (Math.random() < 0.15)
-          bot.chat(
-            pick(["Flanking...", "Going around...", "I'll get behind them..."]),
-          );
-        try {
-          bot.pathfinder.setGoal(
-            new goals.GoalNear(offset.x, offset.y, offset.z, 2),
-            true,
-          );
-        } catch {}
+        throttledGoal(bot, new goals.GoalNear(offset.x, offset.y, offset.z, 2));
         return;
       }
 
       // Kill mobs while searching
-      const { entity: hostile } = findNearestHostile(bot, 8);
+      const { entity: hostile } = findNearestHostile(bot, 5);
       if (hostile) {
-        bot.chat(pick(["Ugh, a mob.", `${hostile.name}? Out of my way!`]));
         try {
           const sword = bot.inventory
             .items()
@@ -1458,36 +1341,21 @@ function setupFlankerAI(bot) {
       }
 
       // Stay near partner
-      const { entity: partner } = findNearestTeammate(bot, 40);
+      const { entity: partner } = findNearestTeammate(bot, 30);
       if (partner) {
         const dist = partner.position.distanceTo(bot.entity.position);
-        if (dist > 20) {
-          try {
-            bot.pathfinder.setGoal(new goals.GoalFollow(partner, 8), true);
-          } catch {}
+        if (dist > 18) {
+          throttledGoal(bot, new goals.GoalFollow(partner, 8));
           return;
         }
       }
 
-      if (Math.random() < 0.06)
-        bot.chat(
-          pick([
-            "Where'd Red team go?",
-            "*lurking*",
-            "They can't hide forever...",
-          ]),
-        );
       const wander = bot.entity.position.offset(
-        (Math.random() - 0.5) * 25,
+        (Math.random() - 0.5) * 18,
         0,
-        (Math.random() - 0.5) * 25,
+        (Math.random() - 0.5) * 18,
       );
-      try {
-        bot.pathfinder.setGoal(
-          new goals.GoalNear(wander.x, wander.y, wander.z, 2),
-          true,
-        );
-      } catch {}
+      throttledGoal(bot, new goals.GoalNear(wander.x, wander.y, wander.z, 2));
     },
 
     stop() {
@@ -1512,7 +1380,7 @@ function spawnBot(botConfig) {
     host: HOST,
     port: PORT,
     version: VERSION,
-    checkTimeoutInterval: 120_000, // 2 min keepalive (default 30s is too short for LAN)
+    checkTimeoutInterval: 300_000, // 5 min keepalive (LAN server can't keep up with 6 bots)
   });
 
   bot.loadPlugin(pathfinder);
