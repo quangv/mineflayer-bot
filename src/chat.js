@@ -36,13 +36,45 @@ export function setupChat(bot) {
         bot.friendlyBot.stopFighting();
         bot.friendlyBot.stopProtecting();
         bot.friendlyBot.stopProgression();
+        bot.friendlyBot.stopAutonomous?.();
+        bot.chat("Stopped. I'll just hang out here.");
+      },
+    },
+
+    go: {
+      desc: "Resume autonomous behavior",
+      run: () => {
+        bot.friendlyBot.startAutonomous?.();
+        bot.chat("Alright, back to exploring!");
       },
     },
 
     protect: {
       desc: 'Protect a player: "protect <name>"',
       run: (args, sender) => {
-        bot.friendlyBot.protect(args[0] || sender);
+        const target = args[0] || sender;
+        bot.friendlyBot.protect(target);
+        // Auto-bind: if you die, I die
+        bot.friendlyBot.boundTo = target;
+        bot.chat(`Our fates are linked, ${target}. If you fall, I fall.`);
+      },
+    },
+
+    bind: {
+      desc: 'Link fate: "bind <name>" — if they die, I die',
+      run: (args, sender) => {
+        const target = args[0] || sender;
+        bot.friendlyBot.boundTo = target;
+        bot.chat(`My fate is bound to ${target}. We live and die together.`);
+      },
+    },
+
+    unbind: {
+      desc: "Unlink fate",
+      run: () => {
+        const was = bot.friendlyBot.boundTo;
+        bot.friendlyBot.boundTo = null;
+        bot.chat(was ? `Fate unlinked from ${was}. I'm on my own now.` : "I wasn't bound to anyone.");
       },
     },
 

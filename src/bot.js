@@ -24,6 +24,8 @@ import { setupCrafting } from "./plugins/crafting.js";
 import { setupInventory } from "./plugins/inventory.js";
 import { setupNether } from "./plugins/nether.js";
 import { setupEnd } from "./plugins/end.js";
+import { setupPersonality } from "./plugins/personality.js";
+import { setupAutonomous } from "./plugins/autonomous.js";
 import { setupProgression } from "./progression/index.js";
 
 export function createBot(config) {
@@ -48,6 +50,8 @@ export function createBot(config) {
     busy: false,
     /** Player the bot is currently following / protecting */
     followTarget: null,
+    /** Player whose fate the bot shares (if they die, bot dies) */
+    boundTo: null,
   };
 
   // ── Lifecycle events ──────────────────────────────────────────────
@@ -65,13 +69,34 @@ export function createBot(config) {
     setupInventory(bot);
     setupNether(bot);
     setupEnd(bot);
+    setupPersonality(bot);
+    setupAutonomous(bot);
     setupProgression(bot);
     setupChat(bot);
+
+    // ── Die-with-player: if the bound player dies, bot kills itself ──
+    bot.on("entityDead", (entity) => {
+      if (!bot.friendlyBot.boundTo) return;
+      const bound = bot.players[bot.friendlyBot.boundTo];
+      if (bound && bound.entity && bound.entity.id === entity.id) {
+        bot.chat(
+          `${bot.friendlyBot.boundTo} has fallen… I follow them into the void!`,
+        );
+        bot.chat("/kill");
+      }
+    });
   });
 
   bot.on("death", () => {
     console.log("[FriendlyBot] I died! Respawning…");
     bot.friendlyBot.busy = false;
+    // If bound to a player, auto-rebind after respawn
+    if (bot.friendlyBot.boundTo) {
+      const name = bot.friendlyBot.boundTo;
+      setTimeout(() => {
+        bot.chat(`I'm back, ${name}! Still bound to you.`);
+      }, 3000);
+    }
   });
 
   bot.on("kicked", (reason) => console.log(`[FriendlyBot] Kicked: ${reason}`));
