@@ -96,8 +96,8 @@ for (const bc of BOTS_CONFIG) kills[bc.name] = 0;
 
 // ── Auto-Rejoin ─────────────────────────────────────────────────────────
 
-const REJOIN_DELAY_BASE = 3000; // 3 seconds
-const REJOIN_DELAY_MAX = 15000; // 15 seconds max
+const REJOIN_DELAY_BASE = 5000; // 5 seconds
+const REJOIN_DELAY_MAX = 30000; // 30 seconds max
 const rejoinAttempts = {};
 
 function scheduleRejoin(botConfig) {
@@ -121,7 +121,7 @@ function scheduleRejoin(botConfig) {
 
 // ── Dumb Bot Config ─────────────────────────────────────────────────────
 
-const DUMB_CHANCE = 0.2;
+const DUMB_CHANCE = 0.1;
 
 const DUMB_THINGS = [
   (bot) => {
@@ -440,7 +440,7 @@ const TEAM_KILL_CHEERS = [
 ];
 
 let lastConvoTime = 0;
-const CONVO_COOLDOWN = 10000;
+const CONVO_COOLDOWN = 25000; // 25 seconds between conversations
 
 function triggerConversation() {
   const now = Date.now();
@@ -469,14 +469,18 @@ function triggerConversation() {
   if (!speakerBot || !replierBot) return;
 
   lastConvoTime = now;
-  speakerBot.chat(convo[1]);
+  try {
+    speakerBot.chat(convo[1]);
+  } catch {}
 
   setTimeout(
     () => {
-      replierBot.chat(convo[3]);
+      try {
+        replierBot?.chat(convo[3]);
+      } catch {}
 
       // Cross-team trash talk sometimes
-      if (Math.random() < 0.3) {
+      if (Math.random() < 0.2) {
         const enemyTeam = useBlue ? RED_TEAM : BLUE_TEAM;
         const trashTalker = pick(
           enemyTeam.filter((bc) => bots[bc.name]?.entity?.isValid),
@@ -486,13 +490,17 @@ function triggerConversation() {
             ? TRASH_TALK.red_to_blue
             : TRASH_TALK.blue_to_red;
           setTimeout(
-            () => bots[trashTalker.name].chat(pick(lines)),
-            1500 + Math.random() * 2000,
+            () => {
+              try {
+                bots[trashTalker.name]?.chat(pick(lines));
+              } catch {}
+            },
+            2000 + Math.random() * 3000,
           );
         }
       }
     },
-    1000 + Math.random() * 2000,
+    1500 + Math.random() * 3000,
   );
 }
 
@@ -506,21 +514,29 @@ function reactToDeath(deadBotName, killerName) {
       bc.name !== deadBotName &&
       bots[bc.name]?.entity?.isValid,
   );
-  let delay = 500;
-  for (const bc of teammates.sort(() => Math.random() - 0.5).slice(0, 2)) {
+  let delay = 800;
+  for (const bc of teammates.sort(() => Math.random() - 0.5).slice(0, 1)) {
     const line = pick(DEATH_REACTIONS.teammate).replace("{dead}", deadBotName);
-    setTimeout(() => bots[bc.name]?.chat(line), delay);
-    delay += 800 + Math.random() * 1000;
+    setTimeout(() => {
+      try {
+        bots[bc.name]?.chat(line);
+      } catch {}
+    }, delay);
+    delay += 1500 + Math.random() * 1000;
   }
 
   // Enemies celebrate
   const enemies = BOTS_CONFIG.filter(
     (bc) => bc.team !== deadTeam && bots[bc.name]?.entity?.isValid,
   );
-  for (const bc of enemies.sort(() => Math.random() - 0.5).slice(0, 2)) {
+  for (const bc of enemies.sort(() => Math.random() - 0.5).slice(0, 1)) {
     const line = pick(DEATH_REACTIONS.enemy).replace("{dead}", deadBotName);
-    setTimeout(() => bots[bc.name]?.chat(line), delay);
-    delay += 600 + Math.random() * 800;
+    setTimeout(() => {
+      try {
+        bots[bc.name]?.chat(line);
+      } catch {}
+    }, delay);
+    delay += 1000 + Math.random() * 800;
   }
 
   // Track kill
@@ -543,12 +559,16 @@ function reactToRespawn(respawnedName) {
       respawnedName,
     );
     setTimeout(
-      () => bots[teammate.name].chat(line),
-      1500 + Math.random() * 2000,
+      () => {
+        try {
+          bots[teammate.name]?.chat(line);
+        } catch {}
+      },
+      2000 + Math.random() * 3000,
     );
   }
   // Enemy
-  if (Math.random() < 0.5) {
+  if (Math.random() < 0.3) {
     const enemy = pick(
       BOTS_CONFIG.filter((bc) => bc.team !== team && bots[bc.name]),
     );
@@ -558,8 +578,12 @@ function reactToRespawn(respawnedName) {
         respawnedName,
       );
       setTimeout(
-        () => bots[enemy.name].chat(line),
-        2500 + Math.random() * 2000,
+        () => {
+          try {
+            bots[enemy.name]?.chat(line);
+          } catch {}
+        },
+        3000 + Math.random() * 3000,
       );
     }
   }
@@ -743,10 +767,10 @@ function setupLeaderAI(bot) {
     start() {
       bot.chat("Alright Red team, let's beat the game! Watch out for Blue!");
       if (bot.friendlyBot?.startProgression) bot.friendlyBot.startProgression();
-      aiInterval = setInterval(() => this.tick(), 5000 + Math.random() * 3000);
+      aiInterval = setInterval(() => this.tick(), 8000 + Math.random() * 5000);
       convoInterval = setInterval(
         () => triggerConversation(),
-        8000 + Math.random() * 6000,
+        20000 + Math.random() * 15000,
       );
     },
 
@@ -791,7 +815,7 @@ function setupLeaderAI(bot) {
       }
 
       // Announce progress
-      if (Math.random() < 0.08 && bot.friendlyBot) {
+      if (Math.random() < 0.04 && bot.friendlyBot) {
         const phase = bot.friendlyBot.phase || "start";
         bot.chat(
           pick([
@@ -822,7 +846,7 @@ function setupBodyguardAI(bot) {
   bot._battleAI = {
     start() {
       bot.chat("Nobody touches FriendlyBot! Especially not Blue team!");
-      aiInterval = setInterval(() => this.tick(), 3000 + Math.random() * 2000);
+      aiInterval = setInterval(() => this.tick(), 6000 + Math.random() * 4000);
     },
 
     async tick() {
@@ -895,7 +919,7 @@ function setupBodyguardAI(bot) {
             await new Promise((r) => setTimeout(r, 1500));
           }
           bot.pathfinder.setGoal(new goals.GoalFollow(leader, 4), true);
-        } else if (Math.random() < 0.04) {
+        } else if (Math.random() < 0.02) {
           bot.chat(
             pick([
               "*stands guard*",
@@ -945,7 +969,7 @@ function setupGathererAI(bot) {
   bot._battleAI = {
     start() {
       bot.chat("Gathering resources! ...and hiding from Blue team!");
-      aiInterval = setInterval(() => this.tick(), 4000 + Math.random() * 4000);
+      aiInterval = setInterval(() => this.tick(), 8000 + Math.random() * 6000);
     },
 
     async tick() {
@@ -1066,7 +1090,7 @@ function setupScoutAI(bot) {
   bot._battleAI = {
     start() {
       bot.chat("Scouting ahead! I'll keep an eye out for Blue team!");
-      aiInterval = setInterval(() => this.tick(), 3500 + Math.random() * 3000);
+      aiInterval = setInterval(() => this.tick(), 7000 + Math.random() * 5000);
     },
 
     async tick() {
@@ -1185,7 +1209,7 @@ function setupHunterAI(bot) {
   bot._battleAI = {
     start() {
       bot.chat("Time to hunt some Red bots! Let's GO!");
-      aiInterval = setInterval(() => this.tick(), 2500 + Math.random() * 2500);
+      aiInterval = setInterval(() => this.tick(), 5000 + Math.random() * 4000);
     },
 
     async tick() {
@@ -1271,7 +1295,7 @@ function setupHunterAI(bot) {
       }
 
       // Wander + search
-      if (Math.random() < 0.3)
+      if (Math.random() < 0.1)
         bot.chat(
           pick([
             "Where are they hiding?",
@@ -1324,7 +1348,7 @@ function setupFlankerAI(bot) {
   bot._battleAI = {
     start() {
       bot.chat("I'll flank them! They won't see me coming...");
-      aiInterval = setInterval(() => this.tick(), 3000 + Math.random() * 3000);
+      aiInterval = setInterval(() => this.tick(), 6000 + Math.random() * 5000);
     },
 
     async tick() {
@@ -1981,12 +2005,20 @@ console.log('    "quit"         - Disconnect all (no rejoin)');
 console.log("==========================================================");
 console.log("");
 
-// Stagger joins
+// Stagger joins — wider delays to avoid overwhelming the server
 let delay = 0;
 for (const bc of BOTS_CONFIG) {
   setTimeout(() => spawnBot(bc), delay);
-  delay += 2500;
+  delay += 5000;
 }
+
+// Prevent uncaught errors from killing the process
+process.on("uncaughtException", (err) => {
+  console.error("\x1b[31m[UNCAUGHT]", err.message, "\x1b[0m");
+});
+process.on("unhandledRejection", (err) => {
+  console.error("\x1b[31m[UNHANDLED]", err?.message || err, "\x1b[0m");
+});
 
 process.on("SIGINT", () => {
   console.log("\n[Battle] Shutting down...");
