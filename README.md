@@ -85,7 +85,7 @@ The `beat` command runs through these phases in order:
 ```
 mineflayer-bot/
 ├── index.js                 # Entry point
-├── battle.js                # Battle mode — two bots fight!
+├── battle.js                # Battle mode — 5 bots, Red vs Blue!
 ├── config.js                # Environment config
 ├── .env.example             # Config template
 ├── package.json
@@ -115,32 +115,47 @@ mineflayer-bot/
 - The bot will auto-protect configured players when they join the server.
 - Progression is ambitious — the bot may need help with some phases depending on the world.
 
-## Battle Mode
+## Battle Mode — 5 Bot Team Battle!
 
-Spawn two bots and watch them fight each other!
+Spawn **5 bots** in a Red vs Blue team battle. Red team tries to beat the game while Blue team hunts them down!
 
 ```bash
 npm run battle
 ```
 
-Both **RedBot** and **BlueBot** will join your server. Say these commands in-game chat:
+### Teams
 
-| Command                | Description                    |
-| ---------------------- | ------------------------------ |
-| `fight`                | Start the battle               |
-| `stop`                 | Pause the battle               |
-| `reset`                | Heal & reset both bots         |
-| `rematch`              | Reset + fight again            |
-| `score`                | Show kill scoreboard           |
-| `arm`                  | Give both bots random gear     |
-| `arm red` / `arm blue` | Give one bot random gear       |
-| `kit stone`            | Equip both with stone gear     |
-| `kit iron`             | Equip both with iron gear      |
-| `kit diamond`          | Equip both with diamond gear   |
-| `kit netherite`        | Equip both with netherite gear |
-| `quit`                 | Disconnect both bots           |
+| Bot             | Team | Role      | Behavior                                        |
+| --------------- | ---- | --------- | ----------------------------------------------- |
+| **FriendlyBot** | Red  | Leader    | Runs the full game progression (beat Minecraft) |
+| **RedGuard1**   | Red  | Bodyguard | Follows & protects FriendlyBot                  |
+| **RedGuard2**   | Red  | Gatherer  | Mines resources, panics when attacked           |
+| **BlueHunter1** | Blue | Hunter    | Aggressively chases Red team                    |
+| **BlueHunter2** | Blue | Flanker   | Sneaks around and attacks from behind           |
+
+All bots are **a little dumb** — they get distracted by butterflies, walk into walls,
+forget their swords, panic, miss attacks, and say silly things. Expect chaos.
+
+### Battle Commands (say in-game chat)
+
+| Command                | Description                      |
+| ---------------------- | -------------------------------- |
+| `fight`                | Blue team starts hunting Red     |
+| `beat`                 | Red team starts game progression |
+| `stop`                 | Everyone stops                   |
+| `score`                | Show kill scoreboard             |
+| `reset`                | Heal all bots                    |
+| `arm`                  | Random gear for all 5 bots       |
+| `arm red` / `arm blue` | Random gear for one team         |
+| `kit stone`            | Stone gear for all               |
+| `kit iron`             | Iron gear for all                |
+| `kit diamond`          | Diamond gear for all             |
+| `kit netherite`        | Netherite gear for all           |
+| `quit`                 | Disconnect all bots              |
 
 > **Note:** Gear commands use `/give` and `/clear`, so your server needs cheats enabled (LAN world with cheats ON, or an operator in a server).
+>
+> **Tip:** Say `fight` and `beat` together for the full experience — Red tries to progress while Blue hunts them!
 
 ## Dependencies
 
