@@ -48,6 +48,8 @@ npm start
 | `BOT_AUTH`          | _(empty)_     | Set to `microsoft` for online-mode servers   |
 | `PROTECTED_PLAYERS` | _(empty)_     | Comma-separated player names to auto-protect |
 | `PROTECTION_RADIUS` | `16`          | Blocks radius to scan for threats            |
+| `BATTLE_RED_NAME`   | `RedBot`      | Red bot name (battle mode)                   |
+| `BATTLE_BLUE_NAME`  | `BlueBot`     | Blue bot name (battle mode)                  |
 
 ## In-Game Chat Commands
 
@@ -83,6 +85,7 @@ The `beat` command runs through these phases in order:
 ```
 mineflayer-bot/
 ├── index.js                 # Entry point
+├── battle.js                # Battle mode — two bots fight!
 ├── config.js                # Environment config
 ├── .env.example             # Config template
 ├── package.json
@@ -111,6 +114,33 @@ mineflayer-bot/
 - If the bot gets stuck, use `stop` then give it a manual command.
 - The bot will auto-protect configured players when they join the server.
 - Progression is ambitious — the bot may need help with some phases depending on the world.
+
+## Battle Mode
+
+Spawn two bots and watch them fight each other!
+
+```bash
+npm run battle
+```
+
+Both **RedBot** and **BlueBot** will join your server. Say these commands in-game chat:
+
+| Command                | Description                    |
+| ---------------------- | ------------------------------ |
+| `fight`                | Start the battle               |
+| `stop`                 | Pause the battle               |
+| `reset`                | Heal & reset both bots         |
+| `rematch`              | Reset + fight again            |
+| `score`                | Show kill scoreboard           |
+| `arm`                  | Give both bots random gear     |
+| `arm red` / `arm blue` | Give one bot random gear       |
+| `kit stone`            | Equip both with stone gear     |
+| `kit iron`             | Equip both with iron gear      |
+| `kit diamond`          | Equip both with diamond gear   |
+| `kit netherite`        | Equip both with netherite gear |
+| `quit`                 | Disconnect both bots           |
+
+> **Note:** Gear commands use `/give` and `/clear`, so your server needs cheats enabled (LAN world with cheats ON, or an operator in a server).
 
 ## Dependencies
 
