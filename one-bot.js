@@ -339,7 +339,7 @@ async function placeBlockAt(b, targetPos, blockName) {
   // Give ourselves the block in creative
   try {
     b.chat(`/give ${b.username} ${blockName} 1`);
-    await new Promise((r) => setTimeout(r, 60));
+    await new Promise((r) => setTimeout(r, 30));
   } catch {}
 
   // Equip
@@ -378,7 +378,7 @@ async function placeBlockAt(b, targetPos, blockName) {
       b.chat(
         `/tp ${b.username} ${flyTarget.x.toFixed(1)} ${flyTarget.y.toFixed(1)} ${flyTarget.z.toFixed(1)}`,
       );
-      await new Promise((r) => setTimeout(r, 100));
+      await new Promise((r) => setTimeout(r, 50));
     } catch {}
   }
 
@@ -386,7 +386,7 @@ async function placeBlockAt(b, targetPos, blockName) {
   if (refBlock && faceVec) {
     try {
       await b.lookAt(targetPos.offset(0.5, 0.5, 0.5));
-      await new Promise((r) => setTimeout(r, 30));
+      await new Promise((r) => setTimeout(r, 15));
       await b.placeBlock(refBlock, faceVec);
       return true;
     } catch {}
@@ -509,7 +509,7 @@ function setupBuildAI(b) {
         }
 
         // Delay between blocks — fast but not instant
-        await new Promise((r) => setTimeout(r, 150 + Math.random() * 200));
+        await new Promise((r) => setTimeout(r, 75 + Math.random() * 100));
 
         if (!building || !challengeActive) return;
       }
