@@ -405,6 +405,32 @@ async function placeBlockAt(b, targetPos, blockName) {
 //  BUILD AI
 // ═══════════════════════════════════════════════════════════════════════
 
+function findSurfaceY(b, x, z) {
+  // Scan from high to low to find the highest solid block with air above
+  const startY = Math.min(b.entity.position.y + 40, 319);
+  for (let y = startY; y > b.entity.position.y - 20; y--) {
+    const block = b.blockAt(vec3(x, y, z));
+    const above = b.blockAt(vec3(x, y + 1, z));
+    if (
+      block &&
+      above &&
+      block.name !== "air" &&
+      block.name !== "cave_air" &&
+      block.name !== "water" &&
+      block.name !== "lava" &&
+      (above.name === "air" || above.name === "cave_air")
+    ) {
+      // Make sure the next block up is also air (2-high clearance)
+      const above2 = b.blockAt(vec3(x, y + 2, z));
+      if (above2 && (above2.name === "air" || above2.name === "cave_air")) {
+        return y + 1; // build ON TOP of this block
+      }
+    }
+  }
+  // Fallback to bot position
+  return b.entity.position.floored().y;
+}
+
 function setupBuildAI(b) {
   b._buildAI = {
     start() {
@@ -413,12 +439,15 @@ function setupBuildAI(b) {
       // Initialize blueprint + origin once (first time or fresh rebuild)
       if (!buildState.initialized) {
         const spawn = b.entity.position.floored();
-        buildState.plotOrigin = { x: spawn.x + 5, y: spawn.y, z: spawn.z + 5 };
+        const buildX = spawn.x + 5;
+        const buildZ = spawn.z + 5;
+        const surfaceY = findSurfaceY(b, buildX, buildZ);
+        buildState.plotOrigin = { x: buildX, y: surfaceY, z: buildZ };
         buildState.blueprint = generateEpicHouse();
         buildState.buildIndex = 0;
         buildState.initialized = true;
         console.log(
-          `[Build] Blueprint: ${buildState.blueprint.length} blocks, origin: (${buildState.plotOrigin.x}, ${buildState.plotOrigin.y}, ${buildState.plotOrigin.z})`,
+          `[Build] Blueprint: ${buildState.blueprint.length} blocks, surface Y=${surfaceY}, origin: (${buildState.plotOrigin.x}, ${buildState.plotOrigin.y}, ${buildState.plotOrigin.z})`,
         );
       }
 
