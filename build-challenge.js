@@ -30,6 +30,7 @@ import "dotenv/config";
 import mineflayer from "mineflayer";
 import pathfinderPkg from "mineflayer-pathfinder";
 const { pathfinder, Movements, goals } = pathfinderPkg;
+import vec3 from "vec3";
 
 // ── Config ──────────────────────────────────────────────────────────────
 
@@ -52,6 +53,18 @@ let challengeActive = false;
 let challengeTimer = null;
 let challengeStart = 0;
 let intentionalQuit = false;
+
+// Persistent build state — survives bot reconnects
+// Keyed by bot name so a rejoining bot picks up where it left off
+const buildState = {};
+for (const bc of BOTS_CONFIG) {
+  buildState[bc.name] = {
+    blueprint: null,
+    buildIndex: 0,
+    plotOrigin: null, // stored as {x, y, z}
+    initialized: false,
+  };
+}
 
 // ── Building Materials ──────────────────────────────────────────────────
 
@@ -356,61 +369,144 @@ function generateHouseB() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════
-//  BUILD AI — drives a bot through its blueprint
+//  BUILD AI — physically walks to each block and places it
 // ═══════════════════════════════════════════════════════════════════════
 
+/**
+ * Tries to place a block at `targetPos` by:
+ *   1. Finding a valid adjacent face to place against
+ *   2. Walking close enough to reach it
+ *   3. Looking at the face and calling bot.placeBlock()
+ *   Falls back to /setblock if physical placement fails.
+ */
+async function placeBlockAt(bot, targetPos, blockName) {
+  const mcData = (await import("minecraft-data")).default(bot.version);
+
+  // In creative mode, give ourselves the block first
+  try {
+    bot.chat(`/give ${bot.username} ${blockName} 1`);
+    await new Promise((r) => setTimeout(r, 150));
+  } catch {}
+
+  // Equip the block
+  try {
+    await new Promise((r) => setTimeout(r, 100));
+    const item = bot.inventory.items().find((it) => it.name === blockName);
+    if (item) {
+      await bot.equip(item, "hand");
+    }
+  } catch {}
+
+  // Find an adjacent solid block to place against
+  const faces = [
+    vec3(0, -1, 0), // below
+    vec3(0, 1, 0), // above
+    vec3(1, 0, 0),
+    vec3(-1, 0, 0),
+    vec3(0, 0, 1),
+    vec3(0, 0, -1),
+  ];
+
+  let refBlock = null;
+  let faceVec = null;
+  for (const face of faces) {
+    const checkPos = targetPos.plus(face);
+    const block = bot.blockAt(checkPos);
+    if (block && block.name !== "air" && block.name !== "cave_air") {
+      refBlock = block;
+      // The face vector points FROM the ref block TO the target
+      faceVec = face.scaled(-1);
+      break;
+    }
+  }
+
+  // Walk close to the target
+  const dist = bot.entity.position.distanceTo(targetPos);
+  if (dist > 4.5) {
+    try {
+      // Fly in creative mode by teleporting close
+      const flyTarget = targetPos.offset(0, 0.5, -2);
+      bot.chat(
+        `/tp ${bot.username} ${flyTarget.x.toFixed(1)} ${flyTarget.y.toFixed(1)} ${flyTarget.z.toFixed(1)}`,
+      );
+      await new Promise((r) => setTimeout(r, 250));
+    } catch {}
+  }
+
+  // Try physical placement
+  if (refBlock && faceVec) {
+    try {
+      await bot.lookAt(targetPos.offset(0.5, 0.5, 0.5));
+      await new Promise((r) => setTimeout(r, 80));
+      await bot.placeBlock(refBlock, faceVec);
+      return true;
+    } catch {}
+  }
+
+  // Fallback: /setblock
+  try {
+    bot.chat(
+      `/setblock ${Math.floor(targetPos.x)} ${Math.floor(targetPos.y)} ${Math.floor(targetPos.z)} ${blockName}`,
+    );
+  } catch {}
+  return false;
+}
+
 function setupBuildAI(bot, botConfig) {
-  let buildInterval = null;
+  let buildLoop = null;
   let chatInterval = null;
-  let blueprint = [];
-  let buildIndex = 0;
-  let plotOrigin = null;
-  let paused = false;
+  let building = false;
+  const state = buildState[botConfig.name];
 
   bot._buildAI = {
     start() {
       if (!bot.entity) return;
 
-      // Determine plot origin relative to spawn
-      const spawn = bot.entity.position.floored();
-      plotOrigin = spawn.offset(botConfig.plotDir * PLOT_OFFSET, 0, 0);
+      // Initialize blueprint + origin once (first time only)
+      if (!state.initialized) {
+        const spawn = bot.entity.position.floored();
+        state.plotOrigin = {
+          x: spawn.x + botConfig.plotDir * PLOT_OFFSET,
+          y: spawn.y,
+          z: spawn.z,
+        };
+        state.blueprint =
+          botConfig.tag === "A" ? generateHouseA() : generateHouseB();
+        state.buildIndex = 0;
+        state.initialized = true;
+      }
 
-      // Pick blueprint based on bot
-      blueprint = botConfig.tag === "A" ? generateHouseA() : generateHouseB();
-      buildIndex = 0;
-      paused = false;
-
+      building = true;
       bot.chat(pick(BUILDING_CHAT.start));
 
-      // Build tick — place 1-3 blocks per tick
-      buildInterval = setInterval(
-        () => this.buildTick(),
-        1800 + Math.random() * 1200,
-      );
+      // Enable creative flight
+      setTimeout(() => {
+        try {
+          bot.chat(`/gamemode creative ${bot.username}`);
+        } catch {}
+      }, 500);
 
-      // Chat tick — occasional commentary
+      // Start build loop
+      this._runLoop();
+
+      // Chat tick
       chatInterval = setInterval(
         () => {
-          if (paused || !challengeActive) return;
-
+          if (!building || !challengeActive) return;
           const remaining = timeRemaining();
-
-          // Panic mode under 3 minutes
           if (remaining < 3 * 60 * 1000 && Math.random() < 0.4) {
             bot.chat(pick(BUILDING_CHAT.panicking));
             return;
           }
-
-          // Trash talk the other bot
           if (Math.random() < 0.3) {
             bot.chat(pick(BUILDING_CHAT.trash_talk));
           } else if (Math.random() < 0.4) {
             bot.chat(pick(BUILDING_CHAT.building));
           }
-
-          // Progress update
           if (Math.random() < 0.15) {
-            const pct = Math.floor((buildIndex / blueprint.length) * 100);
+            const pct = Math.floor(
+              (state.buildIndex / state.blueprint.length) * 100,
+            );
             bot.chat(`I'm ${pct}% done!`);
           }
         },
@@ -418,65 +514,65 @@ function setupBuildAI(bot, botConfig) {
       );
     },
 
-    async buildTick() {
-      if (paused || !challengeActive) return;
-      if (buildIndex >= blueprint.length) {
-        // Done building!
-        if (buildInterval) {
-          clearInterval(buildInterval);
-          buildInterval = null;
+    async _runLoop() {
+      while (
+        building &&
+        challengeActive &&
+        state.buildIndex < state.blueprint.length
+      ) {
+        // Place 1-2 blocks per cycle
+        const count = 1 + Math.floor(Math.random() * 2);
+        for (
+          let i = 0;
+          i < count && state.buildIndex < state.blueprint.length;
+          i++
+        ) {
+          const step = state.blueprint[state.buildIndex];
+          state.buildIndex++;
+
+          if (step.block === "air") continue;
+
+          const origin = state.plotOrigin;
+          const [dx, dy, dz] = step.offset;
+          const targetPos = vec3(origin.x + dx, origin.y + dy, origin.z + dz);
+
+          try {
+            await placeBlockAt(bot, targetPos, step.block);
+          } catch {}
+
+          // Delay between blocks
+          await new Promise((r) => setTimeout(r, 400 + Math.random() * 600));
+
+          if (!building || !challengeActive) return;
         }
-        bot.chat(pick(BUILDING_CHAT.finished));
-        return;
+
+        // Pause between placement cycles
+        await new Promise((r) => setTimeout(r, 800 + Math.random() * 1200));
       }
 
-      // Place 1-3 blocks per tick
-      const blocksThisTick = 1 + Math.floor(Math.random() * 3);
-      for (
-        let i = 0;
-        i < blocksThisTick && buildIndex < blueprint.length;
-        i++
+      // Finished all blocks
+      if (
+        state.buildIndex >= state.blueprint.length &&
+        challengeActive &&
+        building
       ) {
-        const step = blueprint[buildIndex];
-        buildIndex++;
-
-        if (step.block === "air") continue; // skip air placeholders
-
-        const [dx, dy, dz] = step.offset;
-        const pos = plotOrigin.offset(dx, dy, dz);
-
-        try {
-          // Use /setblock command for reliable placement
-          bot.chat(
-            `/setblock ${Math.floor(pos.x)} ${Math.floor(pos.y)} ${Math.floor(pos.z)} ${step.block}`,
-          );
-        } catch (err) {
-          // Ignore placement errors, keep going
-        }
-
-        // Small delay between blocks within same tick
-        if (i < blocksThisTick - 1) {
-          await new Promise((r) => setTimeout(r, 200 + Math.random() * 300));
-        }
+        bot.chat(pick(BUILDING_CHAT.finished));
       }
     },
 
     pause() {
-      paused = true;
+      building = false;
       bot.chat("Pausing build...");
     },
 
     resume() {
-      paused = false;
+      building = true;
       bot.chat("Back to building!");
+      this._runLoop();
     },
 
     stop() {
-      paused = true;
-      if (buildInterval) {
-        clearInterval(buildInterval);
-        buildInterval = null;
-      }
+      building = false;
       if (chatInterval) {
         clearInterval(chatInterval);
         chatInterval = null;
@@ -485,10 +581,10 @@ function setupBuildAI(bot, botConfig) {
 
     getProgress() {
       return {
-        placed: buildIndex,
-        total: blueprint.length,
-        pct: blueprint.length
-          ? Math.floor((buildIndex / blueprint.length) * 100)
+        placed: state.buildIndex,
+        total: state.blueprint?.length || 0,
+        pct: state.blueprint?.length
+          ? Math.floor((state.buildIndex / state.blueprint.length) * 100)
           : 0,
       };
     },
@@ -723,10 +819,18 @@ function spawnBot(botConfig) {
 
     const defaultMove = new Movements(bot);
     defaultMove.canDig = false;
-    defaultMove.allow1by1towers = false;
+    defaultMove.allow1by1towers = true; // creative mode, can fly/tower
+    defaultMove.allowFreeMotion = true;
     bot.pathfinder.setMovements(defaultMove);
 
     bots[name] = bot;
+
+    // Creative mode
+    setTimeout(() => {
+      try {
+        bot.chat(`/gamemode creative ${name}`);
+      } catch {}
+    }, 800);
 
     bot.chat(
       pick([
@@ -744,7 +848,16 @@ function spawnBot(botConfig) {
     // Set up building AI
     setupBuildAI(bot, botConfig);
 
-    if (Object.keys(bots).length >= BOTS_CONFIG.length) {
+    // AUTO-RESUME: if challenge is active, start building immediately!
+    if (challengeActive) {
+      console.log(
+        `${color}[REJOIN] ${name} resuming build! (index ${buildState[name].buildIndex})\x1b[0m`,
+      );
+      setTimeout(() => {
+        bot.chat("I'm back! Let me keep building!");
+        bot._buildAI?.start();
+      }, 2000);
+    } else if (Object.keys(bots).length >= BOTS_CONFIG.length) {
       setTimeout(() => {
         const first = Object.values(bots)[0];
         if (first) {
