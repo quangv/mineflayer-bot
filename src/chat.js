@@ -74,7 +74,11 @@ export function setupChat(bot) {
       run: () => {
         const was = bot.friendlyBot.boundTo;
         bot.friendlyBot.boundTo = null;
-        bot.chat(was ? `Fate unlinked from ${was}. I'm on my own now.` : "I wasn't bound to anyone.");
+        bot.chat(
+          was
+            ? `Fate unlinked from ${was}. I'm on my own now.`
+            : "I wasn't bound to anyone.",
+        );
       },
     },
 
