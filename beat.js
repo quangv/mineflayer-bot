@@ -318,6 +318,33 @@ function startBot() {
     bot.chat(pick(CHAT.death));
   });
 
+  // ── Auto-pickup nearby dropped items ────────────────────────────────
+  bot.on("entitySpawn", (entity) => {
+    if (entity.name !== "item") return;
+    if (bot._beat.frozen) return;
+    const dist = entity.position.distanceTo(bot.entity.position);
+    if (dist < 8) {
+      goTo(entity.position, 0).catch(() => {});
+    }
+  });
+
+  // Periodically sweep for nearby items on the ground
+  setInterval(() => {
+    if (!bot || !bot.entity || bot._beat.frozen) return;
+    const items = Object.values(bot.entities).filter(
+      (e) =>
+        e.name === "item" && e.position.distanceTo(bot.entity.position) < 10,
+    );
+    if (items.length > 0) {
+      const nearest = items.sort(
+        (a, b) =>
+          a.position.distanceTo(bot.entity.position) -
+          b.position.distanceTo(bot.entity.position),
+      )[0];
+      goTo(nearest.position, 0).catch(() => {});
+    }
+  }, 3000);
+
   // ── Disconnect / Reconnect ──────────────────────────────────────────
   bot.on("end", (reason) => {
     console.log(`[Beat] Disconnected: ${reason}`);
