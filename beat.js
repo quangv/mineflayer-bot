@@ -5,15 +5,26 @@
  *   npm run beat
  *
  * Chat commands (say in-game):
- *   arm         — Give the bot weapons, armor, and blocks (no diamond/netherite)
- *   next        — Skip to the next phase/task
- *   status      — Check progress
- *   stop        — Pause progression
- *   resume      — Resume progression
- *   build       — Build a house/shelter
- *   inventory   — List items
- *   help        — Show commands
- *   quit        — Disconnect
+ *   arm              — Give the bot weapons, armor, and blocks (no diamond/netherite)
+ *   next             — Skip to the next phase/task
+ *   mine <block> [n]  — Mine a block type (e.g. "mine diamond_ore 3")
+ *   craft <item> [n]  — Craft an item (e.g. "craft iron_pickaxe")
+ *   smelt <item> [n]  — Smelt an item (e.g. "smelt raw_iron 5")
+ *   build <type>      — Build a structure: house, wall, tower
+ *   give <item> [n]   — /give an item to the bot (no diamond/netherite)
+ *   drop <item> [n]   — Drop items from inventory
+ *   equip             — Equip best gear from inventory
+ *   eat               — Eat the best food available
+ *   sleep             — Try to sleep in a nearby bed
+ *   follow <player>   — Follow a player
+ *   attack <mob>      — Attack nearest mob of that type
+ *   come              — Come to the speaker
+ *   status            — Check progress
+ *   stop              — Pause progression
+ *   resume            — Resume progression
+ *   inventory         — List items
+ *   help              — Show commands
+ *   quit              — Disconnect
  */
 
 import "dotenv/config";
@@ -349,7 +360,7 @@ function setupChatCommands(mcData) {
   const COMMANDS = {
     help: () => {
       bot.chat(
-        "Commands: arm | next | status | stop | resume | build | inventory | come | help | quit",
+        "Commands: arm | next | mine <block> | craft <item> | smelt <item> | build <type> | give <item> | drop <item> | equip | eat | sleep | follow <player> | attack <mob> | come | status | stop | resume | inventory | quit",
       );
     },
 
@@ -433,12 +444,224 @@ function setupChatCommands(mcData) {
       runProgression();
     },
 
-    build: () => {
+    build: (args) => {
       if (bot._beat.busy) {
         bot.chat("I'm busy right now! Try again in a bit.");
         return;
       }
-      buildSurvivalHouse();
+      const type = args[0] || "house";
+      if (type === "house" || type === "shelter") {
+        buildSurvivalHouse();
+      } else if (type === "wall") {
+        buildSimpleStructure("wall");
+      } else if (type === "tower") {
+        buildSimpleStructure("tower");
+      } else {
+        bot.chat(`I can build: house, wall, tower. Try "build house"!`);
+      }
+    },
+
+    mine: (args) => {
+      if (bot._beat.busy) {
+        bot.chat("I'm busy right now! Try again in a bit.");
+        return;
+      }
+      const blockName = args[0];
+      const count = parseInt(args[1], 10) || 1;
+      if (!blockName) {
+        bot.chat(
+          'Tell me what to mine! e.g. "mine oak_log 5" or "mine diamond_ore"',
+        );
+        return;
+      }
+      // Resolve friendly names
+      const resolved = resolveBlockName(blockName, args.slice(0, 2).join("_"));
+      bot.chat(`Mining ${count}x ${resolved}...`);
+      bot._beat.busy = true;
+      mineBlock(resolved, count)
+        .then((ok) => {
+          bot.chat(
+            ok
+              ? `Done mining ${resolved}!`
+              : `Couldn't find ${resolved} nearby.`,
+          );
+        })
+        .catch(() => bot.chat(`Had trouble mining ${resolved}.`))
+        .finally(() => {
+          bot._beat.busy = false;
+        });
+    },
+
+    craft: (args) => {
+      if (bot._beat.busy) {
+        bot.chat("I'm busy right now! Try again in a bit.");
+        return;
+      }
+      const itemName = args[0];
+      const count = parseInt(args[1], 10) || 1;
+      if (!itemName) {
+        bot.chat(
+          'Tell me what to craft! e.g. "craft iron_pickaxe" or "craft torch 8"',
+        );
+        return;
+      }
+      const resolved = resolveItemName(itemName, args.slice(0, 2).join("_"));
+      bot.chat(`Crafting ${count}x ${resolved}...`);
+      bot._beat.busy = true;
+      craftItem(resolved, count)
+        .then((ok) => {
+          bot.chat(
+            ok
+              ? `Crafted ${resolved}!`
+              : `Can't craft ${resolved} — missing materials?`,
+          );
+        })
+        .catch(() => bot.chat(`Had trouble crafting ${resolved}.`))
+        .finally(() => {
+          bot._beat.busy = false;
+        });
+    },
+
+    smelt: (args) => {
+      if (bot._beat.busy) {
+        bot.chat("I'm busy right now! Try again in a bit.");
+        return;
+      }
+      const inputName = args[0];
+      const count = parseInt(args[1], 10) || 1;
+      if (!inputName) {
+        bot.chat('Tell me what to smelt! e.g. "smelt raw_iron 5"');
+        return;
+      }
+      bot.chat(`Smelting ${count}x ${inputName}...`);
+      bot._beat.busy = true;
+      smeltItem(inputName, "coal", count)
+        .then((ok) => {
+          bot.chat(
+            ok ? `Done smelting ${inputName}!` : `Couldn't smelt ${inputName}.`,
+          );
+        })
+        .catch(() => bot.chat(`Had trouble smelting ${inputName}.`))
+        .finally(() => {
+          bot._beat.busy = false;
+        });
+    },
+
+    give: (args) => {
+      const itemName = args[0];
+      const count = args[1] || "1";
+      if (!itemName) {
+        bot.chat('Usage: give <item> [count]. e.g. "give iron_sword"');
+        return;
+      }
+      if (itemName.includes("diamond") || itemName.includes("netherite")) {
+        bot.chat("No diamond or netherite items! I play fair.");
+        return;
+      }
+      bot.chat(`/give ${bot.username} ${itemName} ${count}`);
+    },
+
+    drop: (args) => {
+      const itemName = args[0];
+      const count = parseInt(args[1], 10) || 1;
+      if (!itemName) {
+        bot.chat('Usage: drop <item> [count]. e.g. "drop cobblestone 32"');
+        return;
+      }
+      const item = bot.inventory.items().find((i) => i.name.includes(itemName));
+      if (!item) {
+        bot.chat(`I don't have any ${itemName}!`);
+        return;
+      }
+      const toDrop = Math.min(count, item.count);
+      bot
+        .tossStack(item)
+        .then(() => bot.chat(`Dropped ${toDrop}x ${item.name}!`))
+        .catch(() => bot.chat("Couldn't drop that."));
+    },
+
+    equip: () => {
+      bot.chat("Equipping my best gear...");
+      equipBestWeapon()
+        .then(() => bot.chat("Geared up!"))
+        .catch(() => bot.chat("Nothing better to equip."));
+    },
+
+    eat: () => {
+      const food = bot.inventory.items().find((i) => i.foodRecovery > 0);
+      if (!food) {
+        bot.chat("I don't have any food!");
+        return;
+      }
+      bot
+        .equip(food, "hand")
+        .then(() => bot.consume())
+        .then(() => bot.chat(`Ate ${food.name}! Yum.`))
+        .catch(() => bot.chat("Couldn't eat right now."));
+    },
+
+    sleep: () => {
+      tryToSleep()
+        .then(() => bot.chat("Goodnight!"))
+        .catch(() =>
+          bot.chat("Can't sleep — no bed nearby or it's not night."),
+        );
+    },
+
+    follow: (args, sender) => {
+      const targetName = args[0] || sender;
+      const target = bot.players[targetName];
+      if (!target?.entity) {
+        bot.chat(`I can't see ${targetName}!`);
+        return;
+      }
+      bot.chat(`Following ${targetName}!`);
+      bot._beat.followTarget = targetName;
+      const followLoop = () => {
+        if (!bot._beat.followTarget || bot._beat.followTarget !== targetName)
+          return;
+        const p = bot.players[targetName];
+        if (!p?.entity) {
+          bot.chat(`Lost sight of ${targetName}.`);
+          bot._beat.followTarget = null;
+          return;
+        }
+        const dist = bot.entity.position.distanceTo(p.entity.position);
+        if (dist > 3) {
+          goTo(p.entity.position, 2).catch(() => {});
+        }
+        setTimeout(followLoop, 1000);
+      };
+      followLoop();
+    },
+
+    unfollow: () => {
+      bot._beat.followTarget = null;
+      try {
+        bot.pathfinder.stop();
+      } catch {}
+      bot.chat("Stopped following.");
+    },
+
+    attack: (args) => {
+      const mobName = args[0];
+      if (!mobName) {
+        bot.chat('Tell me what to attack! e.g. "attack zombie"');
+        return;
+      }
+      const entity = bot.nearestEntity(
+        (e) =>
+          e.name && e.name.toLowerCase().includes(mobName) && e.type === "mob",
+      );
+      if (!entity) {
+        bot.chat(`No ${mobName} nearby!`);
+        return;
+      }
+      bot.chat(`Attacking ${entity.name}!`);
+      equipBestWeapon()
+        .then(() => attackEntity(entity))
+        .then(() => bot.chat(`Dealt with that ${entity.name}!`))
+        .catch(() => bot.chat("Combat got messy."));
     },
 
     inventory: () => {
@@ -568,8 +791,29 @@ function setupChatCommands(mcData) {
     const [cmd, ...args] = lower.split(/\s+/);
 
     if (COMMANDS[cmd]) {
-      console.log(`[Beat] ${username} → ${cmd}`);
+      console.log(`[Beat] ${username} → ${cmd} ${args.join(" ")}`);
       COMMANDS[cmd](args, username);
+      return;
+    }
+
+    // Handle two-word aliases: "mine diamond" → mine ["diamond"]
+    const twoWord = [cmd, args[0]].filter(Boolean).join(" ");
+    const TWO_WORD_ALIASES = {
+      "mine diamond": () => COMMANDS.mine(["diamond_ore", "3"], username),
+      "mine iron": () => COMMANDS.mine(["iron_ore", "5"], username),
+      "mine coal": () => COMMANDS.mine(["coal_ore", "5"], username),
+      "mine gold": () => COMMANDS.mine(["gold_ore", "3"], username),
+      "mine wood": () => COMMANDS.mine(["oak_log", "10"], username),
+      "mine stone": () => COMMANDS.mine(["stone", "16"], username),
+      "mine obsidian": () => COMMANDS.mine(["obsidian", "10"], username),
+      "build house": () => COMMANDS.build(["house"], username),
+      "build wall": () => COMMANDS.build(["wall"], username),
+      "build tower": () => COMMANDS.build(["tower"], username),
+      "build shelter": () => COMMANDS.build(["shelter"], username),
+    };
+    if (TWO_WORD_ALIASES[twoWord]) {
+      console.log(`[Beat] ${username} → ${twoWord}`);
+      TWO_WORD_ALIASES[twoWord]();
       return;
     }
 
@@ -643,6 +887,135 @@ function stopChatter() {
 // ═══════════════════════════════════════════════════════════════════════
 //  HELPER UTILITIES
 // ═══════════════════════════════════════════════════════════════════════
+
+// ── Friendly name resolvers ─────────────────────────────────────────────
+
+const BLOCK_ALIASES = {
+  diamond: "diamond_ore",
+  iron: "iron_ore",
+  gold: "gold_ore",
+  coal: "coal_ore",
+  copper: "copper_ore",
+  lapis: "lapis_ore",
+  redstone: "redstone_ore",
+  emerald: "emerald_ore",
+  wood: "oak_log",
+  oak: "oak_log",
+  birch: "birch_log",
+  spruce: "spruce_log",
+  jungle: "jungle_log",
+  acacia: "acacia_log",
+  dark_oak: "dark_oak_log",
+  stone: "stone",
+  cobblestone: "cobblestone",
+  dirt: "dirt",
+  sand: "sand",
+  gravel: "gravel",
+  obsidian: "obsidian",
+  netherrack: "netherrack",
+  clay: "clay",
+};
+
+function resolveBlockName(name, twoWordName) {
+  if (BLOCK_ALIASES[twoWordName]) return BLOCK_ALIASES[twoWordName];
+  if (BLOCK_ALIASES[name]) return BLOCK_ALIASES[name];
+  return name; // pass through as-is
+}
+
+const ITEM_ALIASES = {
+  pickaxe: "iron_pickaxe",
+  iron_pick: "iron_pickaxe",
+  sword: "iron_sword",
+  axe: "iron_axe",
+  shovel: "iron_shovel",
+  hoe: "iron_hoe",
+  bed: "red_bed",
+  door: "oak_door",
+  planks: "oak_planks",
+  sticks: "stick",
+  table: "crafting_table",
+  workbench: "crafting_table",
+  furnace: "furnace",
+  chest: "chest",
+  bucket: "bucket",
+  torch: "torch",
+  ladder: "ladder",
+  boat: "oak_boat",
+};
+
+function resolveItemName(name, twoWordName) {
+  if (ITEM_ALIASES[twoWordName]) return ITEM_ALIASES[twoWordName];
+  if (ITEM_ALIASES[name]) return ITEM_ALIASES[name];
+  return name;
+}
+
+// ── Simple structure builder ──────────────────────────────────────────
+
+async function buildSimpleStructure(type) {
+  bot._beat.busy = true;
+  const mcData = mcDataLoader(bot.version);
+
+  try {
+    // Get building material
+    const plankItem = bot.inventory
+      .items()
+      .find((i) => i.name.endsWith("_planks"));
+    const cobble = bot.inventory.items().find((i) => i.name === "cobblestone");
+    const material = cobble || plankItem;
+
+    if (!material || material.count < 16) {
+      bot.chat(
+        "I need at least 16 planks or cobblestone to build! Gathering...",
+      );
+      await mineBlock("oak_log", 8).catch(() => {});
+      const logCount = countItem("oak_log");
+      if (logCount > 0) await craftItem("oak_planks", logCount).catch(() => {});
+    }
+
+    const matItem = bot.inventory
+      .items()
+      .find((i) => i.name.endsWith("_planks") || i.name === "cobblestone");
+    if (!matItem || matItem.count < 10) {
+      bot.chat("Still not enough materials to build!");
+      return;
+    }
+    const MAT = matItem.name;
+    const origin = bot.entity.position.floored().offset(2, 0, 2);
+
+    if (type === "wall") {
+      bot.chat("Building a defensive wall...");
+      for (let x = 0; x < 9; x++) {
+        for (let y = 0; y < 3; y++) {
+          await placeBlockAt(origin.offset(x, y, 0), MAT);
+        }
+      }
+      bot.chat("Wall is done! That should keep mobs out.");
+    } else if (type === "tower") {
+      bot.chat("Building a watchtower...");
+      // 3x3 base, 6 tall, with platform on top
+      for (let y = 0; y < 6; y++) {
+        for (let x = 0; x < 3; x++) {
+          for (let z = 0; z < 3; z++) {
+            if (x > 0 && x < 2 && z > 0 && z < 2 && y < 5) continue; // hollow inside
+            await placeBlockAt(origin.offset(x, y, z), MAT);
+          }
+        }
+      }
+      // Top platform 5x5
+      for (let x = -1; x < 4; x++) {
+        for (let z = -1; z < 4; z++) {
+          await placeBlockAt(origin.offset(x, 6, z), MAT);
+        }
+      }
+      bot.chat("Watchtower complete! Great view from up there.");
+    }
+  } catch (err) {
+    console.log(`[Beat] Build ${type} error: ${err.message}`);
+    bot.chat(`Had some trouble building the ${type}, but I tried!`);
+  } finally {
+    bot._beat.busy = false;
+  }
+}
 
 function countItem(name) {
   return bot.inventory
