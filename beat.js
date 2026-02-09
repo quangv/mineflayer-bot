@@ -69,6 +69,8 @@ let intentionalQuit = false;
 let reconnectAttempts = 0;
 let progressionRunning = false;
 let chatInterval = null;
+let pickupInterval = null;
+let sleepInterval = null;
 
 // ── Hostile mobs list ───────────────────────────────────────────────────
 
@@ -300,13 +302,49 @@ function startBot() {
     // Setup chat commands
     setupChatCommands(mcData);
 
-    // React to damage
+    // React to damage — auto-retaliate against attacking mobs
     let lastHealth = 20;
+    let lastRetaliateTime = 0;
     bot.on("health", () => {
       if (bot.health < lastHealth && bot.health > 0) {
         if (Math.random() < 0.5) bot.chat(pick(CHAT.hurt));
+        // Auto-retaliate: find the mob that's attacking us
+        if (!bot._beat.frozen) {
+          const now = Date.now();
+          if (now - lastRetaliateTime > 1500) {
+            lastRetaliateTime = now;
+            const attacker = bot.nearestEntity(
+              (e) =>
+                e.type === "mob" &&
+                HOSTILE_MOBS.includes(e.name) &&
+                e.position.distanceTo(bot.entity.position) < 8,
+            );
+            if (attacker) {
+              equipBestWeapon()
+                .then(() => attackEntity(attacker))
+                .catch(() => {});
+            }
+          }
+        }
       }
       lastHealth = bot.health;
+    });
+
+    // Also retaliate when a mob directly hurts us
+    bot.on("entityHurt", (entity) => {
+      if (entity !== bot.entity) return;
+      if (bot._beat.frozen) return;
+      const attacker = bot.nearestEntity(
+        (e) =>
+          e.type === "mob" &&
+          HOSTILE_MOBS.includes(e.name) &&
+          e.position.distanceTo(bot.entity.position) < 8,
+      );
+      if (attacker) {
+        equipBestWeapon()
+          .then(() => attackEntity(attacker))
+          .catch(() => {});
+      }
     });
   });
 
@@ -319,21 +357,30 @@ function startBot() {
   });
 
   // ── Auto-pickup nearby dropped items ────────────────────────────────
+  let lastPickupAttempt = 0;
   bot.on("entitySpawn", (entity) => {
     if (entity.name !== "item") return;
-    if (bot._beat.frozen) return;
+    if (bot._beat.frozen || bot._beat.busy) return;
+    const now = Date.now();
+    if (now - lastPickupAttempt < 2000) return; // throttle: max once per 2s
+    if (!bot.entity) return;
     const dist = entity.position.distanceTo(bot.entity.position);
-    if (dist < 8) {
+    if (dist < 6) {
+      lastPickupAttempt = now;
       goTo(entity.position, 0).catch(() => {});
     }
   });
 
   // Periodically sweep for nearby items on the ground
-  setInterval(() => {
-    if (!bot || !bot.entity || bot._beat.frozen) return;
+  if (pickupInterval) clearInterval(pickupInterval);
+  pickupInterval = setInterval(() => {
+    if (!bot || !bot.entity || bot._beat.frozen || bot._beat.busy) return;
     const items = Object.values(bot.entities).filter(
       (e) =>
-        e.name === "item" && e.position.distanceTo(bot.entity.position) < 10,
+        e.name === "item" &&
+        e.position &&
+        bot.entity.position &&
+        e.position.distanceTo(bot.entity.position) < 8,
     );
     if (items.length > 0) {
       const nearest = items.sort(
@@ -343,7 +390,27 @@ function startBot() {
       )[0];
       goTo(nearest.position, 0).catch(() => {});
     }
-  }, 3000);
+  }, 5000);
+
+  // ── Auto-sleep at nighttime ─────────────────────────────────────────
+  if (sleepInterval) clearInterval(sleepInterval);
+  sleepInterval = setInterval(() => {
+    if (!bot || !bot.entity || bot._beat.frozen) return;
+    if (bot.isSleeping) return;
+    // bot.time.timeOfDay >= 12541 means it's night
+    if (bot.time && bot.time.timeOfDay >= 12541) {
+      const bed = bot.findBlock({
+        matching: (block) => bot.isABed(block),
+        maxDistance: 32,
+      });
+      if (bed) {
+        goTo(bed.position, 2)
+          .then(() => bot.sleep(bed))
+          .then(() => bot.chat("Goodnight! Sleeping through the night."))
+          .catch(() => {}); // bed occupied, too far, etc.
+      }
+    }
+  }, 30000);
 
   // ── Disconnect / Reconnect ──────────────────────────────────────────
   bot.on("end", (reason) => {
@@ -351,6 +418,14 @@ function startBot() {
     progressionRunning = false;
     bot._beat && (bot._beat.busy = false);
     stopChatter();
+    if (pickupInterval) {
+      clearInterval(pickupInterval);
+      pickupInterval = null;
+    }
+    if (sleepInterval) {
+      clearInterval(sleepInterval);
+      sleepInterval = null;
+    }
 
     if (!intentionalQuit && reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
       reconnectAttempts++;
