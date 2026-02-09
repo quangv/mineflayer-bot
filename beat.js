@@ -450,8 +450,12 @@ function setupChatCommands(mcData) {
       progressionRunning = false;
       bot._beat.busy = false;
       bot._beat.mode = "idle";
-      try { bot.pathfinder.stop(); } catch {}
-      try { bot.pvp.stop(); } catch {}
+      try {
+        bot.pathfinder.stop();
+      } catch {}
+      try {
+        bot.pvp.stop();
+      } catch {}
 
       const target = (args[0] || "").toLowerCase();
       if (target === "reset" || target === "start") {
@@ -459,7 +463,9 @@ function setupChatCommands(mcData) {
         persistentState.phaseIndex = 0;
         persistentState.phase = "start";
         bot._beat.phase = "start";
-        bot.chat("Full reset! Starting the entire journey from scratch. Here we go!");
+        bot.chat(
+          "Full reset! Starting the entire journey from scratch. Here we go!",
+        );
       } else {
         // Default: jump to the end phase (dragon fight)
         const endIdx = PHASES.findIndex((p) => p.name === "end");
@@ -472,7 +478,9 @@ function setupChatCommands(mcData) {
           persistentState.phaseIndex = endIdx;
           persistentState.phase = "end";
           bot._beat.phase = "end";
-          bot.chat("The dragon thinks it won? WRONG. Resetting to the End fight — round 2!");
+          bot.chat(
+            "The dragon thinks it won? WRONG. Resetting to the End fight — round 2!",
+          );
         }
       }
       persistentState.dragonsKilled = persistentState.dragonsKilled || 0;
@@ -845,6 +853,7 @@ function setupChatCommands(mcData) {
       "build wall": () => COMMANDS.build(["wall"], username),
       "build tower": () => COMMANDS.build(["tower"], username),
       "build shelter": () => COMMANDS.build(["shelter"], username),
+      "stand still": () => COMMANDS.stand([], username),
     };
     if (TWO_WORD_ALIASES[twoWord]) {
       console.log(`[Beat] ${username} → ${twoWord}`);
