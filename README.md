@@ -14,6 +14,14 @@ Make sure using a supported minecraft version (Java 1.21.10)
 
 (version and port is in `.env`)
 
+## Commands
+
+Spectator mode
+
+```
+/gamemode spectator <username>
+```
+
 ## Features
 
 - **Player Protection** — Follows a player, detects nearby hostile mobs, and fights them off.
