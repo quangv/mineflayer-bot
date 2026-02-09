@@ -6,6 +6,7 @@
  *
  * Chat commands (say in-game):
  *   arm         — Give the bot weapons, armor, and blocks (no diamond/netherite)
+ *   next        — Skip to the next phase/task
  *   status      — Check progress
  *   stop        — Pause progression
  *   resume      — Resume progression
@@ -348,7 +349,7 @@ function setupChatCommands(mcData) {
   const COMMANDS = {
     help: () => {
       bot.chat(
-        "Commands: arm | status | stop | resume | build | inventory | come | help | quit",
+        "Commands: arm | next | status | stop | resume | build | inventory | come | help | quit",
       );
     },
 
@@ -390,6 +391,37 @@ function setupChatCommands(mcData) {
         bot.pvp.stop();
       } catch {}
       bot.chat("Paused! Say 'resume' to continue the dragon quest.");
+    },
+
+    next: () => {
+      if (!progressionRunning) {
+        bot.chat("I'm not running right now. Say 'resume' first!");
+        return;
+      }
+      const nextIdx = persistentState.phaseIndex + 1;
+      if (nextIdx >= PHASES.length) {
+        bot.chat("I'm already on the last phase!");
+        return;
+      }
+      const nextPhase = PHASES[nextIdx];
+      bot.chat(
+        `Skipping "${PHASES[persistentState.phaseIndex].label}" → moving to "${nextPhase.label}"!`,
+      );
+      // Stop current activity
+      try {
+        bot.pathfinder.stop();
+      } catch {}
+      try {
+        bot.pvp.stop();
+      } catch {}
+      bot._beat.busy = false;
+      // Advance the index so the progression loop picks it up
+      persistentState.phaseIndex = nextIdx;
+      persistentState.phase = nextPhase.name;
+      bot._beat.phase = nextPhase.name;
+      // Restart the progression loop from the new phase
+      progressionRunning = false;
+      setTimeout(() => runProgression(), 500);
     },
 
     resume: () => {
