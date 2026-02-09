@@ -22,6 +22,18 @@ Spectator mode
 /gamemode spectator <username>
 ```
 
+Night Vision
+
+```
+/effect give lukaskimanh minecraft:night_vision infinite
+```
+
+Teleport
+
+```
+/tp @p <BotName>
+```
+
 ## Features
 
 - **Player Protection** — Follows a player, detects nearby hostile mobs, and fights them off.
