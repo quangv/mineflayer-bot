@@ -31,24 +31,23 @@ const VERSION = process.env.BOT_VERSION || "1.20.4";
 
 const RECONNECT_DELAY = 5000;
 
+const PLOT_SPACING = 60; // blocks apart so houses don't overlap
+
 const BOTS_CONFIG = [
-  { name: "BuilderA", tag: "A", color: "\x1b[33m" },
-  { name: "BuilderB", tag: "B", color: "\x1b[36m" },
+  { name: "BuilderA", tag: "A", color: "\x1b[33m", plotDir: -1 },
+  { name: "BuilderB", tag: "B", color: "\x1b[36m", plotDir: 1 },
 ];
 
-// ── Shared Persistent State (survives reconnects) ───────────────────────
-
-const buildState = {
-  blueprint: null,
-  plotOrigin: null, // { x, y, z }
-  initialized: false,
-};
-
-// Per-bot build indices — each bot tracks its own position
-const botProgress = {
-  BuilderA: { buildIndex: 0 },
-  BuilderB: { buildIndex: 0 },
-};
+// Per-bot persistent state (survives reconnects)
+const botState = {};
+for (const bc of BOTS_CONFIG) {
+  botState[bc.name] = {
+    blueprint: null,
+    plotOrigin: null,
+    buildIndex: 0,
+    initialized: false,
+  };
+}
 
 const bots = {};
 let challengeActive = false;
@@ -93,10 +92,10 @@ function pick(arr) {
 
 const CHAT = {
   start: [
-    "Let's build this together!",
-    "Teamwork makes the dream work!",
-    "Two builders, one epic house!",
-    "Let's gooo! Building time!",
+    "My house is gonna be WAY better!",
+    "Watch and learn! Building time!",
+    "Let's see who builds faster!",
+    "Prepare to be amazed!",
   ],
   building: [
     "This is looking SO good.",
@@ -444,30 +443,30 @@ function findSurfaceY(b, x, z) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════
-//  BUILD AI — each bot builds every other block (A=even, B=odd)
+//  BUILD AI — each bot builds its OWN separate house
 // ═══════════════════════════════════════════════════════════════════════
 
 function setupBuildAI(b, botConfig) {
-  const botIdx = botConfig.tag === "A" ? 0 : 1; // A builds even indices, B builds odd
   let building = false;
   let chatInterval = null;
-  const progress = botProgress[botConfig.name];
+  const state = botState[botConfig.name];
 
   b._buildAI = {
     start() {
       if (!b.entity) return;
 
-      // Initialize shared blueprint + origin once (first bot to start)
-      if (!buildState.initialized) {
+      // Each bot gets its own blueprint + plot origin
+      if (!state.initialized) {
         const spawn = b.entity.position.floored();
-        const buildX = spawn.x + 5;
+        const buildX = spawn.x + botConfig.plotDir * PLOT_SPACING / 2;
         const buildZ = spawn.z + 5;
         const surfaceY = findSurfaceY(b, buildX, buildZ);
-        buildState.plotOrigin = { x: buildX, y: surfaceY, z: buildZ };
-        buildState.blueprint = generateHouse();
-        buildState.initialized = true;
+        state.plotOrigin = { x: buildX, y: surfaceY, z: buildZ };
+        state.blueprint = generateHouse();
+        state.buildIndex = 0;
+        state.initialized = true;
         console.log(
-          `[Build] Blueprint: ${buildState.blueprint.length} blocks, surface Y=${surfaceY}`,
+          `[${botConfig.name}] Blueprint: ${state.blueprint.length} blocks, origin: (${buildX}, ${surfaceY}, ${buildZ})`,
         );
       }
 
@@ -475,60 +474,47 @@ function setupBuildAI(b, botConfig) {
       b.chat(pick(CHAT.start));
 
       setTimeout(() => {
-        try {
-          b.chat(`/gamemode creative ${b.username}`);
-        } catch {}
+        try { b.chat(`/gamemode creative ${b.username}`); } catch {}
       }, 500);
 
       this._runLoop();
 
-      chatInterval = setInterval(
-        () => {
-          if (!building || !challengeActive) return;
-          if (Math.random() < 0.3) b.chat(pick(CHAT.building));
-          if (Math.random() < 0.15) {
-            const p = this.getProgress();
-            b.chat(`My progress: ${p.pct}%`);
-          }
-        },
-        30000 + Math.random() * 20000,
-      );
+      chatInterval = setInterval(() => {
+        if (!building || !challengeActive) return;
+        if (Math.random() < 0.3) b.chat(pick(CHAT.building));
+        if (Math.random() < 0.15) {
+          const p = this.getProgress();
+          b.chat(`My progress: ${p.pct}%`);
+        }
+      }, 30000 + Math.random() * 20000);
     },
 
     async _runLoop() {
-      const bp = buildState.blueprint;
+      const bp = state.blueprint;
       if (!bp) return;
 
-      // This bot handles blocks at indices where (index % 2 === botIdx)
-      // progress.buildIndex tracks which "slot" we're at in our own sequence
-      let globalIdx = progress.buildIndex * 2 + botIdx;
-
-      while (building && challengeActive && globalIdx < bp.length) {
-        const step = bp[globalIdx];
-        progress.buildIndex++;
+      while (building && challengeActive && state.buildIndex < bp.length) {
+        const step = bp[state.buildIndex];
+        state.buildIndex++;
 
         if (step.block !== "air") {
-          const o = buildState.plotOrigin;
+          const o = state.plotOrigin;
           const [dx, dy, dz] = step.offset;
           const targetPos = vec3(o.x + dx, o.y + dy, o.z + dz);
 
           try {
             await placeBlockAt(b, targetPos, step.block);
           } catch {
-            if (!b.entity) {
-              building = false;
-              return;
-            }
+            if (!b.entity) { building = false; return; }
           }
 
           await new Promise((r) => setTimeout(r, 75 + Math.random() * 100));
         }
 
         if (!building || !challengeActive) return;
-        globalIdx = progress.buildIndex * 2 + botIdx;
       }
 
-      if (globalIdx >= bp.length && challengeActive && building) {
+      if (state.buildIndex >= bp.length && challengeActive && building) {
         b.chat(pick(CHAT.finished));
         building = false;
       }
@@ -540,10 +526,7 @@ function setupBuildAI(b, botConfig) {
     },
 
     resume() {
-      if (!challengeActive) {
-        b.chat('Say "go" first!');
-        return;
-      }
+      if (!challengeActive) { b.chat('Say "go" first!'); return; }
       building = true;
       b.chat("Back to building!");
       this._runLoop();
@@ -551,24 +534,23 @@ function setupBuildAI(b, botConfig) {
 
     stop() {
       building = false;
-      if (chatInterval) {
-        clearInterval(chatInterval);
-        chatInterval = null;
-      }
+      if (chatInterval) { clearInterval(chatInterval); chatInterval = null; }
     },
 
     reset() {
       this.stop();
-      progress.buildIndex = 0;
+      state.buildIndex = 0;
+      state.blueprint = null;
+      state.plotOrigin = null;
+      state.initialized = false;
     },
 
     getProgress() {
-      const bp = buildState.blueprint;
-      const myTotal = bp ? Math.ceil(bp.length / 2) : 0;
+      const total = state.blueprint?.length || 0;
       return {
-        placed: progress.buildIndex,
-        total: myTotal,
-        pct: myTotal ? Math.floor((progress.buildIndex / myTotal) * 100) : 0,
+        placed: state.buildIndex,
+        total,
+        pct: total ? Math.floor((state.buildIndex / total) * 100) : 0,
       };
     },
   };
@@ -635,30 +617,17 @@ function setupChatHandler(b) {
     }
 
     if (msg === "status") {
-      const totalBlocks = buildState.blueprint?.length || 0;
-      const totalPlaced =
-        botProgress.BuilderA.buildIndex + botProgress.BuilderB.buildIndex;
-      const totalPct = totalBlocks
-        ? Math.floor(((totalPlaced * 2) / totalBlocks) * 100)
-        : 0;
-      b.chat(
-        `Overall: ~${Math.min(totalPct, 100)}% (${totalBlocks} blocks total)`,
-      );
       for (const bc of BOTS_CONFIG) {
-        const bot = bots[bc.name];
-        if (bot?._buildAI) {
-          const p = bot._buildAI.getProgress();
-          b.chat(`  ${bc.name}: ${p.pct}% (${p.placed}/${p.total})`);
-        }
+        const st = botState[bc.name];
+        const total = st.blueprint?.length || 0;
+        const pct = total ? Math.floor((st.buildIndex / total) * 100) : 0;
+        b.chat(`${bc.name}: ${pct}% (${st.buildIndex}/${total} blocks)`);
       }
       return;
     }
 
     if (msg === "rebuild") {
       for (const bot of Object.values(bots)) bot._buildAI?.reset();
-      buildState.blueprint = null;
-      buildState.plotOrigin = null;
-      buildState.initialized = false;
       challengeActive = false;
       b.chat('Reset! Say "go" to start fresh.');
       return;
@@ -728,12 +697,10 @@ function spawnBot(botConfig) {
     setupBuildAI(b, botConfig);
 
     // Auto-resume on rejoin
-    if (challengeActive && buildState.initialized) {
-      const p = botProgress[name];
-      const myTotal = buildState.blueprint
-        ? Math.ceil(buildState.blueprint.length / 2)
-        : 0;
-      const pct = myTotal ? Math.floor((p.buildIndex / myTotal) * 100) : 0;
+    if (challengeActive && botState[name].initialized) {
+      const st = botState[name];
+      const total = st.blueprint?.length || 0;
+      const pct = total ? Math.floor((st.buildIndex / total) * 100) : 0;
       console.log(`${color}[REJOIN] ${name} resuming at ${pct}%\x1b[0m`);
       setTimeout(() => {
         b.chat(pick(CHAT.resumed));
@@ -778,14 +745,14 @@ function spawnBot(botConfig) {
 // ═══════════════════════════════════════════════════════════════════════
 
 console.log("==========================================================");
-console.log("       MINEFLAYER TWO BOTS — COOPERATIVE HOUSE BUILD");
+console.log("       MINEFLAYER TWO BOTS — SEPARATE HOUSES");
 console.log("==========================================================");
 console.log("");
 for (const bc of BOTS_CONFIG)
-  console.log(`  ${bc.color}${bc.name}\x1b[0m - Builder ${bc.tag}`);
+  console.log(`  ${bc.color}${bc.name}\x1b[0m - Builder ${bc.tag} (${bc.plotDir < 0 ? 'LEFT' : 'RIGHT'} side)`);
 console.log("");
 console.log(`  Server: ${HOST}:${PORT} (v${VERSION})`);
-console.log(`  House:  50×50 — split between 2 builders`);
+console.log(`  Houses: Each bot builds its own 50×50 house`);
 console.log("");
 console.log("  In-game commands:");
 console.log('    "go"          - Start building');
