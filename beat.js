@@ -24,6 +24,7 @@
  *   resume            — Resume progression
  *   inventory         — List items
  *   help              — Show commands
+ *   beat              — Reset and fight the Ender Dragon again
  *   quit              — Disconnect
  */
 
@@ -360,7 +361,7 @@ function setupChatCommands(mcData) {
   const COMMANDS = {
     help: () => {
       bot.chat(
-        "Commands: arm | next | mine <block> | craft <item> | smelt <item> | build <type> | give <item> | drop <item> | equip | eat | sleep | follow <player> | attack <mob> | come | status | stop | resume | inventory | quit",
+        "Commands: arm | next | beat | mine <block> | craft <item> | smelt <item> | build <type> | give <item> | drop <item> | equip | eat | sleep | follow <player> | attack <mob> | come | status | stop | resume | inventory | quit",
       );
     },
 
@@ -442,6 +443,40 @@ function setupChatCommands(mcData) {
       }
       bot.chat("Back to it! The dragon awaits!");
       runProgression();
+    },
+
+    beat: (args) => {
+      // Stop everything first
+      progressionRunning = false;
+      bot._beat.busy = false;
+      bot._beat.mode = "idle";
+      try { bot.pathfinder.stop(); } catch {}
+      try { bot.pvp.stop(); } catch {}
+
+      const target = (args[0] || "").toLowerCase();
+      if (target === "reset" || target === "start") {
+        // Full reset — start from the very beginning
+        persistentState.phaseIndex = 0;
+        persistentState.phase = "start";
+        bot._beat.phase = "start";
+        bot.chat("Full reset! Starting the entire journey from scratch. Here we go!");
+      } else {
+        // Default: jump to the end phase (dragon fight)
+        const endIdx = PHASES.findIndex((p) => p.name === "end");
+        if (endIdx === -1) {
+          bot.chat("Can't find the End phase! Restarting from the beginning.");
+          persistentState.phaseIndex = 0;
+          persistentState.phase = "start";
+          bot._beat.phase = "start";
+        } else {
+          persistentState.phaseIndex = endIdx;
+          persistentState.phase = "end";
+          bot._beat.phase = "end";
+          bot.chat("The dragon thinks it won? WRONG. Resetting to the End fight — round 2!");
+        }
+      }
+      persistentState.dragonsKilled = persistentState.dragonsKilled || 0;
+      setTimeout(() => runProgression(), 500);
     },
 
     build: (args) => {
