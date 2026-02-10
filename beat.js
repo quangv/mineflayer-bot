@@ -223,6 +223,17 @@ const CHAT = {
 function startBot() {
   if (intentionalQuit) return;
 
+  // Clean up old bot to prevent memory leaks
+  if (bot) {
+    try {
+      bot.removeAllListeners();
+    } catch {}
+    try {
+      bot.end();
+    } catch {}
+    bot = null;
+  }
+
   console.log(
     `[Beat] Starting "${BOT_NAME}" → ${HOST}:${PORT} (attempt ${reconnectAttempts + 1})`,
   );
@@ -251,6 +262,9 @@ function startBot() {
     phase: persistentState.phase,
     houseBuilt: persistentState.houseBuilt,
     houseOrigin: null,
+    frozen: false,
+    followTarget: null,
+    alive: true, // set false on disconnect to stop loops
   };
 
   // ── Spawn ───────────────────────────────────────────────────────────
@@ -374,20 +388,19 @@ function startBot() {
   // Periodically sweep for nearby items on the ground
   if (pickupInterval) clearInterval(pickupInterval);
   pickupInterval = setInterval(() => {
-    if (!bot || !bot.entity || bot._beat.frozen || bot._beat.busy) return;
-    const items = Object.values(bot.entities).filter(
-      (e) =>
-        e.name === "item" &&
-        e.position &&
-        bot.entity.position &&
-        e.position.distanceTo(bot.entity.position) < 8,
-    );
-    if (items.length > 0) {
-      const nearest = items.sort(
-        (a, b) =>
-          a.position.distanceTo(bot.entity.position) -
-          b.position.distanceTo(bot.entity.position),
-      )[0];
+    if (!bot || !bot.entity || !bot._beat?.alive) return;
+    if (bot._beat.frozen || bot._beat.busy) return;
+    let nearestDist = Infinity;
+    let nearest = null;
+    for (const entity of Object.values(bot.entities)) {
+      if (!entity || entity.name !== "item" || !entity.position) continue;
+      const dist = entity.position.distanceTo(bot.entity.position);
+      if (dist < 8 && dist < nearestDist) {
+        nearest = entity;
+        nearestDist = dist;
+      }
+    }
+    if (nearest) {
       goTo(nearest.position, 0).catch(() => {});
     }
   }, 5000);
@@ -395,7 +408,8 @@ function startBot() {
   // ── Auto-sleep at nighttime ─────────────────────────────────────────
   if (sleepInterval) clearInterval(sleepInterval);
   sleepInterval = setInterval(() => {
-    if (!bot || !bot.entity || bot._beat.frozen) return;
+    if (!bot || !bot.entity || !bot._beat?.alive) return;
+    if (bot._beat.frozen) return;
     if (bot.isSleeping) return;
     // bot.time.timeOfDay >= 12541 means it's night
     if (bot.time && bot.time.timeOfDay >= 12541) {
@@ -762,7 +776,10 @@ function setupChatCommands(mcData) {
       }
       bot.chat(`Following ${targetName}!`);
       bot._beat.followTarget = targetName;
+      const currentBot = bot; // capture reference to detect reconnect
       const followLoop = () => {
+        if (currentBot !== bot) return; // bot was replaced, stop
+        if (!bot._beat.alive) return;
         if (!bot._beat.followTarget || bot._beat.followTarget !== targetName)
           return;
         const p = bot.players[targetName];
